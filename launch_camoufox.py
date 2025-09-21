@@ -623,7 +623,7 @@ if __name__ == "__main__":
                 "addons": [],
                 # "proxy": camoufox_proxy_internal, # 已移除
                 "exclude_addons": [DefaultAddons.UBO], # Assuming DefaultAddons.UBO exists
-                "window": (1280, 800)
+                "window": (1440, 900)
             }
 
             # 正确添加代理的方式
