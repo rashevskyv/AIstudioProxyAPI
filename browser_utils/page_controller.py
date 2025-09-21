@@ -14,8 +14,7 @@ from config import (
     PROMPT_TEXTAREA_SELECTOR, RESPONSE_CONTAINER_SELECTOR, RESPONSE_TEXT_SELECTOR,
     EDIT_MESSAGE_BUTTON_SELECTOR,USE_URL_CONTEXT_SELECTOR,UPLOAD_BUTTON_SELECTOR,
     SET_THINKING_BUDGET_TOGGLE_SELECTOR, THINKING_BUDGET_INPUT_SELECTOR,
-    GROUNDING_WITH_GOOGLE_SEARCH_TOGGLE_SELECTOR,
-    AI_STUDIO_URL_PATTERN
+    GROUNDING_WITH_GOOGLE_SEARCH_TOGGLE_SELECTOR
 )
 from config import (
     CLICK_TIMEOUT_MS, WAIT_FOR_ELEMENT_TIMEOUT_MS, CLEAR_CHAT_VERIFY_TIMEOUT_MS,
@@ -533,44 +532,139 @@ class PageController:
                 raise
 
     async def clear_chat_history(self, check_client_disconnected: Callable):
-        """
-        Clears the chat history by navigating to the new_chat URL, which is more
-        robust than relying on button clicks that can fail with UI changes.
-        """
-        self.logger.info(f"[{self.req_id}] Starting robust chat clear by navigating to new_chat URL...")
-        await self._check_disconnect(check_client_disconnected, "Start Robust Clear Chat")
+        """清空聊天记录。"""
+        self.logger.info(f"[{self.req_id}] 开始清空聊天记录...")
+        await self._check_disconnect(check_client_disconnected, "Start Clear Chat")
 
         try:
-            # Define the target URL for a new chat
-            new_chat_url = f"https://{AI_STUDIO_URL_PATTERN}prompts/new_chat"
-            
-            # Navigate to the URL to ensure a fresh state
-            await self.page.goto(new_chat_url, wait_until="domcontentloaded", timeout=30000)
-            
-            # Wait for the main input area to be visible to confirm the page is ready
-            await expect_async(self.page.locator(PROMPT_TEXTAREA_SELECTOR)).to_be_visible(timeout=30000)
-            
-            self.logger.info(f"[{self.req_id}] ✅ Chat cleared successfully by navigation.")
+            # 一般是使用流式代理时遇到,流式输出已结束,但页面上AI仍回复个不停,此时会锁住清空按钮,但页面仍是/new_chat,而跳过后续清空操作
+            # 导致后续请求无法发出而卡住,故先检查并点击发送按钮(此时是停止功能)
+            submit_button_locator = self.page.locator(SUBMIT_BUTTON_SELECTOR)
+            try:
+                self.logger.info(f"[{self.req_id}] 尝试检查发送按钮状态...")
+                # 使用较短的超时时间（1秒），避免长时间阻塞，因为这不是清空流程的常见步骤
+                await expect_async(submit_button_locator).to_be_enabled(timeout=1000)
+                self.logger.info(f"[{self.req_id}] 发送按钮可用，尝试点击并等待1秒...")
+                await submit_button_locator.click(timeout=CLICK_TIMEOUT_MS)
+                await asyncio.sleep(1.0)
+                self.logger.info(f"[{self.req_id}] 发送按钮点击并等待完成。")
+            except Exception as e_submit:
+                # 如果发送按钮不可用、超时或发生Playwright相关错误，记录日志并继续
+                self.logger.info(f"[{self.req_id}] 发送按钮不可用或检查/点击时发生Playwright错误。符合预期,继续检查清空按钮。")
 
-            # Re-enable temporary chat mode as navigation might reset it
-            self.logger.info(f"[{self.req_id}] Re-enabling 'Temporary Chat' mode after clearing.")
-            await enable_temporary_chat_mode(self.page)
+            clear_chat_button_locator = self.page.locator(CLEAR_CHAT_BUTTON_SELECTOR)
+            confirm_button_locator = self.page.locator(CLEAR_CHAT_CONFIRM_BUTTON_SELECTOR)
+            overlay_locator = self.page.locator(OVERLAY_SELECTOR)
+
+            can_attempt_clear = False
+            try:
+                await expect_async(clear_chat_button_locator).to_be_enabled(timeout=3000)
+                can_attempt_clear = True
+                self.logger.info(f"[{self.req_id}] \"清空聊天\"按钮可用，继续清空流程。")
+            except Exception as e_enable:
+                is_new_chat_url = '/prompts/new_chat' in self.page.url.rstrip('/')
+                if is_new_chat_url:
+                    self.logger.info(f"[{self.req_id}] \"清空聊天\"按钮不可用 (预期，因为在 new_chat 页面)。跳过清空操作。")
+                else:
+                    self.logger.warning(f"[{self.req_id}] 等待\"清空聊天\"按钮可用失败: {e_enable}。清空操作可能无法执行。")
+
+            await self._check_disconnect(check_client_disconnected, "清空聊天 - \"清空聊天\"按钮可用性检查后")
+
+            if can_attempt_clear:
+                await self._execute_chat_clear(clear_chat_button_locator, confirm_button_locator, overlay_locator, check_client_disconnected)
+                await self._verify_chat_cleared(check_client_disconnected)
+                self.logger.info(f"[{self.req_id}] 聊天已清空，重新启用 '临时聊天' 模式...")
+                await enable_temporary_chat_mode(self.page)
 
         except Exception as e_clear:
-            self.logger.error(f"[{self.req_id}] Robust chat clear process failed: {e_clear}")
+            self.logger.error(f"[{self.req_id}] 清空聊天过程中发生错误: {e_clear}")
             if not (isinstance(e_clear, ClientDisconnectedError) or (hasattr(e_clear, 'name') and 'Disconnect' in e_clear.name)):
-                await save_error_snapshot(f"robust_clear_chat_error_{self.req_id}")
+                await save_error_snapshot(f"clear_chat_error_{self.req_id}")
             raise
 
     async def _execute_chat_clear(self, clear_chat_button_locator, confirm_button_locator, overlay_locator, check_client_disconnected: Callable):
-        # This function is now unused by the new clear_chat_history method,
-        # but we can leave it here for now or remove it.
-        # For this fix, we will just ignore it.
-        pass
+        """执行清空聊天操作"""
+        overlay_initially_visible = False
+        try:
+            if await overlay_locator.is_visible(timeout=1000):
+                overlay_initially_visible = True
+                self.logger.info(f"[{self.req_id}] 清空聊天确认遮罩层已可见。直接点击\"继续\"。")
+        except TimeoutError:
+            self.logger.info(f"[{self.req_id}] 清空聊天确认遮罩层初始不可见 (检查超时或未找到)。")
+            overlay_initially_visible = False
+        except Exception as e_vis_check:
+            self.logger.warning(f"[{self.req_id}] 检查遮罩层可见性时发生错误: {e_vis_check}。假定不可见。")
+            overlay_initially_visible = False
+
+        await self._check_disconnect(check_client_disconnected, "清空聊天 - 初始遮罩层检查后")
+
+        if overlay_initially_visible:
+            self.logger.info(f"[{self.req_id}] 点击\"继续\"按钮 (遮罩层已存在): {CLEAR_CHAT_CONFIRM_BUTTON_SELECTOR}")
+            await confirm_button_locator.click(timeout=CLICK_TIMEOUT_MS)
+        else:
+            self.logger.info(f"[{self.req_id}] 点击\"清空聊天\"按钮: {CLEAR_CHAT_BUTTON_SELECTOR}")
+            await clear_chat_button_locator.click(timeout=CLICK_TIMEOUT_MS)
+            await self._check_disconnect(check_client_disconnected, "清空聊天 - 点击\"清空聊天\"后")
+
+            try:
+                self.logger.info(f"[{self.req_id}] 等待清空聊天确认遮罩层出现: {OVERLAY_SELECTOR}")
+                await expect_async(overlay_locator).to_be_visible(timeout=WAIT_FOR_ELEMENT_TIMEOUT_MS)
+                self.logger.info(f"[{self.req_id}] 清空聊天确认遮罩层已出现。")
+            except TimeoutError:
+                error_msg = f"等待清空聊天确认遮罩层超时 (点击清空按钮后)。请求 ID: {self.req_id}"
+                self.logger.error(error_msg)
+                await save_error_snapshot(f"clear_chat_overlay_timeout_{self.req_id}")
+                raise Exception(error_msg)
+
+            await self._check_disconnect(check_client_disconnected, "清空聊天 - 遮罩层出现后")
+            self.logger.info(f"[{self.req_id}] 点击\"继续\"按钮 (在对话框中): {CLEAR_CHAT_CONFIRM_BUTTON_SELECTOR}")
+            await confirm_button_locator.click(timeout=CLICK_TIMEOUT_MS)
+
+        await self._check_disconnect(check_client_disconnected, "清空聊天 - 点击\"继续\"后")
+
+        # 等待对话框消失
+        max_retries_disappear = 3
+        for attempt_disappear in range(max_retries_disappear):
+            try:
+                self.logger.info(f"[{self.req_id}] 等待清空聊天确认按钮/对话框消失 (尝试 {attempt_disappear + 1}/{max_retries_disappear})...")
+                await expect_async(confirm_button_locator).to_be_hidden(timeout=CLEAR_CHAT_VERIFY_TIMEOUT_MS)
+                await expect_async(overlay_locator).to_be_hidden(timeout=1000)
+                self.logger.info(f"[{self.req_id}] ✅ 清空聊天确认对话框已成功消失。")
+                break
+            except TimeoutError:
+                self.logger.warning(f"[{self.req_id}] ⚠️ 等待清空聊天确认对话框消失超时 (尝试 {attempt_disappear + 1}/{max_retries_disappear})。")
+                if attempt_disappear < max_retries_disappear - 1:
+                    await asyncio.sleep(1.0)
+                    await self._check_disconnect(check_client_disconnected, f"清空聊天 - 重试消失检查 {attempt_disappear + 1} 前")
+                    continue
+                else:
+                    error_msg = f"达到最大重试次数。清空聊天确认对话框未消失。请求 ID: {self.req_id}"
+                    self.logger.error(error_msg)
+                    await save_error_snapshot(f"clear_chat_dialog_disappear_timeout_{self.req_id}")
+                    raise Exception(error_msg)
+            except ClientDisconnectedError:
+                self.logger.info(f"[{self.req_id}] 客户端在等待清空确认对话框消失时断开连接。")
+                raise
+            except Exception as other_err:
+                self.logger.warning(f"[{self.req_id}] 等待清空确认对话框消失时发生其他错误: {other_err}")
+                if attempt_disappear < max_retries_disappear - 1:
+                    await asyncio.sleep(1.0)
+                    continue
+                else:
+                    raise
+
+            await self._check_disconnect(check_client_disconnected, f"清空聊天 - 消失检查尝试 {attempt_disappear + 1} 后")
 
     async def _verify_chat_cleared(self, check_client_disconnected: Callable):
-        # This function is also now unused by the new clear_chat_history method.
-        pass
+        """验证聊天已清空"""
+        last_response_container = self.page.locator(RESPONSE_CONTAINER_SELECTOR).last
+        await asyncio.sleep(0.5)
+        await self._check_disconnect(check_client_disconnected, "After Clear Post-Delay")
+        try:
+            await expect_async(last_response_container).to_be_hidden(timeout=CLEAR_CHAT_VERIFY_TIMEOUT_MS - 500)
+            self.logger.info(f"[{self.req_id}] ✅ 聊天已成功清空 (验证通过 - 最后响应容器隐藏)。")
+        except Exception as verify_err:
+            self.logger.warning(f"[{self.req_id}] ⚠️ 警告: 清空聊天验证失败 (最后响应容器未隐藏): {verify_err}")
     
     async def submit_prompt(self, prompt: str,image_list: List, check_client_disconnected: Callable):
         """提交提示到页面。"""
