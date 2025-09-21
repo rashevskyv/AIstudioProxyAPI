@@ -159,6 +159,58 @@ poetry run python -c "import fastapi; print(f'FastAPI: {fastapi.__version__}')"
 poetry run python -c "import playwright; print('Playwright: OK')"
 ```
 
+## 🚀 如何启动服务
+
+在您完成安装和环境配置后，强烈建议您先将 `.env.example` 文件复制为 `.env` 并根据您的需求进行修改。这会极大地简化后续的启动命令。
+
+```bash
+# 复制配置模板
+cp .env.example .env
+
+# 编辑配置文件
+nano .env  # 或使用其他编辑器
+```
+
+完成配置后，您可以选择以下几种方式启动服务：
+
+### 1. GUI 启动 (最推荐)
+
+对于大多数用户，尤其是新手，我们强烈推荐使用图形化界面 (GUI) 启动器。这是最简单、最直观的方式。
+
+```bash
+# 在 Poetry 环境中运行
+poetry run python gui_launcher.py
+
+# 或者，如果您已经激活了虚拟环境
+python gui_launcher.py
+```
+
+GUI 启动器会自动处理后台进程，并提供一个简单的界面来控制服务的启动和停止，以及查看日志。
+
+### 2. 命令行启动 (进阶)
+
+对于熟悉命令行的用户，可以直接使用 `launch_camoufox.py` 脚本启动服务。
+
+```bash
+# 启动无头 (headless) 模式，这是服务器部署的常用方式
+poetry run python launch_camoufox.py --headless
+
+# 启动调试 (debug) 模式，会显示浏览器界面
+poetry run python launch_camoufox.py --debug
+```
+
+您可以通过添加不同的参数来控制启动行为，例如：
+- `--headless`: 在后台运行浏览器，不显示界面。
+- `--debug`: 启动时显示浏览器界面，方便调试。
+- 更多参数请参阅[高级配置指南](advanced-configuration.md)。
+
+### 3. Docker 启动
+
+如果您熟悉 Docker，也可以使用容器化方式部署服务。这种方式可以提供更好的环境隔离。
+
+详细的 Docker 启动指南，请参阅：
+- **[Docker 部署指南](../docker/README-Docker.md)**
+
 ## 多平台指南
 
 ### macOS / Linux
