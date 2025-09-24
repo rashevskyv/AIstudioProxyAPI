@@ -130,8 +130,8 @@ LANG_TEXTS = {
     "status_label": {"zh": "状态", "en": "Status"},
     "output_label": {"zh": "输出日志", "en": "Output Log"},
     "menu_language_fixed": {"zh": "Language", "en": "Language"},
-    "menu_lang_zh_option": {"zh": "中文 (Chinese)", "en": "中文 (Chinese)"},
-    "menu_lang_en_option": {"zh": "英文 (English)", "en": "英文 (English)"},
+    "menu_lang_zh_option": {"zh": "中文 (Chinese)", "en": "Chinese (中文)"},
+    "menu_lang_en_option": {"zh": "英文 (English)", "en": "English"},
     "confirm_quit_title": {"zh": "确认退出", "en": "Confirm Quit"},
     "confirm_quit_message": {"zh": "服务可能仍在独立终端中运行。确认退出GUI吗?", "en": "Services may still be running in independent terminals. Confirm quit GUI?"},
     "confirm_quit_message_independent": {"zh": "独立后台服务 '{service_name}' 可能仍在运行。直接退出GUI吗 (服务将继续运行)?", "en": "Independent background service '{service_name}' may still be running. Quit GUI (service will continue to run)?"},
@@ -296,7 +296,7 @@ LANG_TEXTS = {
 }
 
 # 删除重复的定义
-current_language = 'zh'
+current_language = 'en'
 root_widget: Optional[tk.Tk] = None
 process_status_text_var: Optional[tk.StringVar] = None
 port_entry_var: Optional[tk.StringVar] = None # 将用于 FastAPI 端口

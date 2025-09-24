@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="zh-CN" id="html-root">
+<html lang="en" id="html-root">
 
 <head>
     <meta charset="UTF-8">
@@ -40,7 +40,7 @@
                             d="M21 15C21 15.5304 20.7893 16.0391 20.4142 16.4142C20.0391 16.7893 19.5304 17 19 17H7L3 21V5C3 4.46957 3.21071 3.96086 3.58579 3.58579C3.96086 3.21071 4.46957 3 5 3H19C19.5304 3 20.0391 3.21071 20.4142 3.58579C20.7893 3.96086 21 4.46957 21 5V15Z"
                             stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
                     </svg>
-                    聊天
+                    Chat
                 </button>
                 <button id="nav-model-settings" class="nav-button">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"
@@ -52,7 +52,7 @@
                             d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"
                             stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
                     </svg>
-                    设置
+                    Model Settings
                 </button>
                 <button id="nav-server-info" class="nav-button">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"
@@ -61,9 +61,9 @@
                             d="M5 12H19M5 12C3.89543 12 3 11.1046 3 10V6C3 4.89543 3.89543 4 5 4H19C20.1046 4 21 4.89543 21 6V10C21 11.1046 20.1046 12 19 12M5 12C3.89543 12 3 12.8954 3 14V18C3 19.1046 3.89543 20 5 20H19C20.1046 20 21 19.1046 21 18V14C21 12.8954 20.1046 12 19 12M7 8H7.01M7 16H7.01"
                             stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
                     </svg>
-                    其他
+                    Server Status
                 </button>
-                <button id="themeToggleButton" title="切换主题">
+                <button id="themeToggleButton" title="Toggle theme">
                     <svg id="darkModeIcon" class="theme-icon" viewBox="0 0 24 24" fill="none"
                         xmlns="http://www.w3.org/2000/svg">
                         <path d="M12 3a1 1 0 0 1 1 1v1a1 1 0 1 1-2 0V4a1 1 0 0 1 1-1Z" fill="currentColor" />
@@ -104,37 +104,37 @@
                         <div class="model-selector-container">
                             
                             <select id="modelSelector"></select>
-                            <button id="refreshModelsButton" title="刷新模型列表">刷新</button>
+                            <button id="refreshModelsButton" title="Refresh model list">Refresh</button>
                         </div>
-                        <textarea id="userInput" placeholder="输入消息... (Shift+Enter 换行)" rows="1"></textarea>
-                        <button id="clearButton" class="action-button">清空</button>
-                        <button id="sendButton" class="action-button">发送</button>
+                        <textarea id="userInput" placeholder="Enter a message... (Shift+Enter for newline)" rows="1"></textarea>
+                        <button id="clearButton" class="action-button">Clear</button>
+                        <button id="sendButton" class="action-button">Send</button>
                     </div>
                 </div>
 
                 <!-- Server Info View (hidden by default) -->
                 <div id="server-info-view">
                     <div class="server-info-header">
-                        <h3>服务器状态与 API 信息</h3>
-                        <button id="refreshServerInfoButton" class="action-button" title="刷新状态">刷新</button>
+                        <h3>Server Status & API Info</h3>
+                        <button id="refreshServerInfoButton" class="action-button" title="Refresh status">Refresh</button>
                     </div>
 
                     <div id="api-info-area" class="info-card">
-                        <h3>API 调用信息</h3>
+                        <h3>API Call Info</h3>
                         <div id="api-info-content">
                             <div class="loading-indicator">
                                 <div class="loading-spinner"></div>
-                                <span>正在加载 API 信息...</span>
+                                <span>Loading API info...</span>
                             </div>
                         </div>
                     </div>
 
                     <div id="health-status-area" class="info-card">
-                        <h3>服务健康检查状态</h3>
+                        <h3>Service Health Status</h3>
                         <div id="health-status-display">
                             <div class="loading-indicator">
                                 <div class="loading-spinner"></div>
-                                <span>正在加载健康状态...</span>
+                                <span>Loading health status...</span>
                             </div>
                         </div>
                     </div>
@@ -143,26 +143,26 @@
                 <!-- Model Settings View (hidden by default) -->
                 <div id="model-settings-view">
                     <div class="server-info-header">
-                        <h3>模型对话设置</h3>
-                        <button id="resetModelSettingsButton" class="action-button" title="重置为默认设置">重置</button>
+                        <h3>Model Conversation Settings</h3>
+                        <button id="resetModelSettingsButton" class="action-button" title="Reset to defaults">Reset</button>
                     </div>
 
-                    <!-- API密钥管理区域 -->
+                    <!-- APIAPI key management area -->
                     <div class="info-card">
-                        <h3>API 密钥管理</h3>
+                        <h3>API Key Management</h3>
                         <div class="settings-group">
                             <div class="api-key-status" id="apiKeyStatus">
                                 <div class="loading-indicator">
                                     <div class="loading-spinner"></div>
-                                    <span>正在检查API密钥状态...</span>
+                                    <span>Checking API key status...</span>
                                 </div>
                             </div>
 
                             <div class="api-key-input-group">
-                                <label for="newApiKey">验证API密钥:</label>
+                                <label for="newApiKey">Verify API Key:</label>
                                 <div class="api-key-input-container">
-                                    <input type="password" id="newApiKey" class="settings-input" placeholder="输入要验证的API密钥...">
-                                    <button id="toggleApiKeyVisibility" class="icon-button" title="显示/隐藏密钥">
+                                    <input type="password" id="newApiKey" class="settings-input" placeholder="Enter the API key to verify...">
+                                    <button id="toggleApiKeyVisibility" class="icon-button" title="Show / hide key">
                                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
                                             <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
                                             <circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
@@ -170,62 +170,62 @@
                                     </button>
                                 </div>
                                 <div class="api-key-actions">
-                                    <button id="testApiKeyButton" class="action-button">验证密钥</button>
+                                    <button id="testApiKeyButton" class="action-button">Verify Key</button>
                                 </div>
                             </div>
 
                             <div class="api-key-list" id="apiKeyList">
-                                <!-- 现有密钥列表将在这里显示 -->
+                                <!-- Existing keys will be displayed here -->
                             </div>
 
                             <div class="settings-description">
-                                <strong>说明:</strong>
+                                <strong>Notes:</strong>
                                 <ul>
-                                    <li>支持标准的 OpenAI 格式: <code>Authorization: Bearer &lt;your_key&gt;</code></li>
-                                    <li>也支持自定义格式: <code>X-API-Key: &lt;your_key&gt;</code></li>
-                                    <li>输入的密钥会自动保存到浏览器本地存储，刷新页面后无需重新输入</li>
-                                    <li>此界面用于验证密钥有效性和查看服务器密钥状态</li>
-                                    <li>验证成功后可查看服务器上配置的密钥列表（打码显示）</li>
-                                    <li>对话功能将使用您输入验证的密钥，不会使用服务器密钥</li>
-                                    <li>如需添加密钥到服务器，请联系管理员或直接编辑服务器配置</li>
+                                    <li>Supports the standard OpenAI format: <code>Authorization: Bearer &lt;your_key&gt;</code></li>
+                                    <li>Also supports custom format: <code>X-API-Key: &lt;your_key&gt;</code></li>
+                                    <li>Keys are saved locally; no need to re-enter after refreshing the page.</li>
+                                    <li>Use this panel to verify the key and check server key status.</li>
+                                    <li>After verification you can view the server key list (masked).</li>
+                                    <li>Chat will use the key you verified, not the server key.</li>
+                                    <li>To add keys on the server, contact an admin or edit the server configuration directly.</li>
                                 </ul>
                             </div>
                         </div>
                     </div>
 
                     <div class="info-card">
-                        <h3>系统提示词</h3>
+                        <h3>System Prompt</h3>
                         <div class="settings-group">
-                            <label for="systemPrompt">系统提示词 (System Prompt):</label>
+                            <label for="systemPrompt">System Prompt:</label>
                             <textarea id="systemPrompt" class="settings-textarea" rows="4"
-                                placeholder="输入系统提示词..."></textarea>
+                                placeholder="Enter a system prompt..."></textarea>
                             <div class="settings-description">
-                                系统提示词会在每次对话开始时发送给模型，用于设置模型的行为和角色。
+                                The system prompt is sent at the start of each conversation to define the model's behaviour and persona.
                             </div>
                         </div>
                     </div>
 
                     <div class="info-card">
-                        <h3>生成参数</h3>
+                        <h3>Generation Parameters</h3>
                         <div class="settings-group">
-                            <label for="temperatureValue">温度 (Temperature):</label>
+                            <label for="temperatureValue">Temperature:</label>
                             <div class="settings-slider-container">
                                 <input type="range" id="temperatureSlider" class="settings-slider" min="0" max="2" step="0.01" value="1">
                                 <input type="number" id="temperatureValue" class="settings-number" min="0" max="2" step="0.01" value="1">
                             </div>
                             <div class="settings-description">
-                                控制生成文本的随机性。值越高，回复越随机；值越低，回复越确定。
+                                Controls randomness. Higher values increase variety; lower values make replies more predictable.
                             </div>
                         </div>
 
                         <div class="settings-group">
-                            <label for="maxOutputTokensValue">最大输出令牌 (Max Output Tokens):</label>
+                            <label for="maxOutputTokensValue">Max Output Tokens:</label>
                             <div class="settings-slider-container">
                                 <input type="range" id="maxOutputTokensSlider" class="settings-slider" min="1" max="8192" step="1" value="2048">
                                 <input type="number" id="maxOutputTokensValue" class="settings-number" min="1" max="8192" step="1" value="2048">
                             </div>
                             <div class="settings-description">
-                                限制模型生成的最大令牌数量。
+                                Limits the maximum number of tokens the model can produce.
                             </div>
                         </div>
 
@@ -236,26 +236,26 @@
                                 <input type="number" id="topPValue" class="settings-number" min="0" max="1" step="0.01" value="0.95">
                             </div>
                             <div class="settings-description">
-                                控制文本生成的多样性。值越低，生成的文本越集中于高概率词汇。
+                                Controls diversity. Lower values focus on high-probability tokens.
                             </div>
                         </div>
 
                         <div class="settings-group">
-                            <label for="stopSequences">停止序列 (Stop Sequences):</label>
-                            <input type="text" id="stopSequences" class="settings-input" placeholder="用逗号分隔多个停止序列">
+                            <label for="stopSequences">Stop Sequences:</label>
+                            <input type="text" id="stopSequences" class="settings-input" placeholder="Separate multiple stop sequences with commas">
                             <div class="settings-description">
-                                模型遇到这些序列时会停止生成。多个序列用逗号分隔。
-                                <br>留空表示使用服务器默认值。
+                                Generation stops when these sequences appear. Separate multiple entries with commas.
+                                <br>Leave blank to use the server default.
                             </div>
                         </div>
                     </div>
 
                     <div class="info-card">
-                        <h3>设置保存状态</h3>
+                        <h3>Settings Save Status</h3>
                         <div id="settings-status" class="settings-status">
-                            参数设置将自动应用于聊天，并保存在本地浏览器中。
+                            Settings apply automatically to chat and are stored locally.
                         </div>
-                        <button id="saveModelSettingsButton" class="action-button full-width-button">保存设置</button>
+                        <button id="saveModelSettingsButton" class="action-button full-width-button">Save Settings</button>
                     </div>
                 </div>
             </div>
@@ -266,19 +266,19 @@
         <div class="sidebar-panel collapsed" id="sidebarPanel">
             <div id="log-area">
                 <div id="log-area-header">
-                    <span>系统终端输出日志</span>
-                    <button id="clearLogButton" class="action-button icon-button" title="清空日志">清理</button>
+                    <span>System Log Output</span>
+                    <button id="clearLogButton" class="action-button icon-button" title="Clear log">Clear</button>
                 </div>
                 <div id="log-terminal-wrapper">
                     <div id="log-terminal">
                         <!-- Log entries will be appended here -->
                     </div>
                 </div>
-                <div id="log-status" class="log-status">[Log Status] 等待连接...</div>
+                <div id="log-status" class="log-status">[Log Status] Waiting for connection...</div>
             </div>
         </div>
 
-        <button id="toggleSidebarButton" title="展开侧边栏">></button>
+        <button id="toggleSidebarButton" title="Expand sidebar">></button>
 
     </div>
 
