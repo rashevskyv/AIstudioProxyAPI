@@ -321,12 +321,16 @@ async def queue_worker():
                 # 清空聊天历史（对于所有模式：流式和非流式）
                 if submit_btn_loc and client_disco_checker:
                     from server import page_instance, is_page_ready
-                    if page_instance and is_page_ready:
-                        from browser_utils.page_controller import PageController
-                        page_controller = PageController(page_instance, logger, req_id)
-                        logger.info(f"[{req_id}] (Worker) 执行聊天历史清空（{'流式' if completion_event else '非流式'}模式）...")
-                        await page_controller.clear_chat_history(client_disco_checker)
-                        logger.info(f"[{req_id}] (Worker) ✅ 聊天历史清空完成。")
+                    from config.constants import ENABLE_CONTINUOUS_CHAT
+                    if not ENABLE_CONTINUOUS_CHAT:
+                        if page_instance and is_page_ready:
+                            from browser_utils.page_controller import PageController
+                            page_controller = PageController(page_instance, logger, req_id)
+                            logger.info(f"[{req_id}] (Worker) 执行聊天历史清空（{'流式' if completion_event else '非流式'}模式）...")
+                            await page_controller.clear_chat_history(client_disco_checker)
+                            logger.info(f"[{req_id}] (Worker) ✅ 聊天历史清空完成。")
+                    else:
+                        logger.info(f"[{req_id}] (Worker) 连续对话模式已启用，跳过清空聊天历史。")
                 else:
                     logger.info(f"[{req_id}] (Worker) 跳过聊天历史清空：缺少必要参数（submit_btn_loc: {bool(submit_btn_loc)}, client_disco_checker: {bool(client_disco_checker)}）")
             except Exception as clear_err:

@@ -24,6 +24,7 @@ ENABLE_URL_CONTEXT = os.environ.get('ENABLE_URL_CONTEXT', 'false').lower() in ('
 ENABLE_THINKING_BUDGET = os.environ.get('ENABLE_THINKING_BUDGET', 'false').lower() in ('true', '1', 'yes')
 DEFAULT_THINKING_BUDGET = int(os.environ.get('DEFAULT_THINKING_BUDGET', '8192'))
 ENABLE_GOOGLE_SEARCH = os.environ.get('ENABLE_GOOGLE_SEARCH', 'false').lower() in ('true', '1', 'yes')
+ENABLE_CONTINUOUS_CHAT = os.environ.get('ENABLE_CONTINUOUS_CHAT', 'false').lower() in ('true', '1', 'yes')
 
 # 默认停止序列 - 支持 JSON 格式配置
 try:
