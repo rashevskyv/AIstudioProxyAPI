@@ -3,6 +3,9 @@ PageController模块
 封装了所有与Playwright页面直接交互的复杂逻辑。
 """
 import asyncio
+import re
+import base64
+import mimetypes
 from typing import Callable, List, Dict, Any, Optional
 
 from playwright.async_api import Page as AsyncPage, expect as expect_async, TimeoutError
@@ -666,6 +669,37 @@ class PageController:
         except Exception as verify_err:
             self.logger.warning(f"[{self.req_id}] ⚠️ 警告: 清空聊天验证失败 (最后响应容器未隐藏): {verify_err}")
     
+    async def _try_direct_file_set(self, files_list: List[str]) -> bool:
+        """尝试直接在输入框附近的 <input type="file"> 上设置文件，避免复杂的按钮/弹窗流程。"""
+        try:
+            # 尝试在提示输入区域内查找文件输入
+            candidate_locators = [
+                self.page.locator('ms-prompt-input-wrapper input[type="file"]'),
+                self.page.locator('ms-prompt-input-wrapper').locator('input[type="file"]'),
+                self.page.locator('ms-prompt-input-wrapper ms-autosize-textarea input[type="file"]'),
+                self.page.locator('input[type="file"]')
+            ]
+            for loc in candidate_locators:
+                count = await loc.count()
+                if count > 0:
+                    try:
+                        first = loc.first
+                        await first.set_input_files(files_list)
+                        # 触发 change/input 事件，确保框架响应
+                        try:
+                            await first.evaluate('(el) => { el.dispatchEvent(new Event("input", {bubbles:true})); el.dispatchEvent(new Event("change", {bubbles:true})); }')
+                        except Exception:
+                            pass
+                        self.logger.info(f"[{self.req_id}] ✅ 通过直接设置 <input type=file> 完成文件添加: {len(files_list)} 个")
+                        return True
+                    except Exception as e_set:
+                        self.logger.warning(f"[{self.req_id}] 直接设置 <input type=file> 失败，尝试下一种定位方式: {e_set}")
+                        continue
+            return False
+        except Exception as e:
+            self.logger.warning(f"[{self.req_id}] 直接设置文件时出现异常: {e}")
+            return False
+
     async def submit_prompt(self, prompt: str,image_list: List, check_client_disconnected: Callable):
         """提交提示到页面。"""
         self.logger.info(f"[{self.req_id}] 填充并提交提示 ({len(prompt)} chars)...")
@@ -691,36 +725,73 @@ class PageController:
             await autosize_wrapper_locator.evaluate('(element, text) => { element.setAttribute("data-value", text); }', prompt)
             await self._check_disconnect(check_client_disconnected, "After Input Fill")
 
-            # 上传
+            # 上传（优先模拟拖放到输入框，其次尝试直接设置 input[type=file]，最后回退到原按钮触发）
+            try:
+                self.logger.info(f"[{self.req_id}] 待上传附件数量: {len(image_list)}")
+            except Exception:
+                pass
             if len(image_list) > 0:
+                # 1) 模拟拖放到输入框
                 try:
-                    # 1. 监听文件选择器
-                    #    page.expect_file_chooser() 会返回一个上下文管理器
-                    #    当文件选择器出现时，它会得到 FileChooser 对象
-                    function_btn_localtor = self.page.locator('button[aria-label="Insert assets such as images, videos, files, or audio"]')
-                    await function_btn_localtor.click()
-                    #asyncio.sleep(0.5)
-                    async with self.page.expect_file_chooser() as fc_info:
-                        # 2. 点击那个会触发文件选择的普通按钮
-                        upload_btn_localtor = self.page.locator(UPLOAD_BUTTON_SELECTOR)
-                        await upload_btn_localtor.click()
-                        print("点击了 JS 上传按钮，等待文件选择器...")
+                    await self._simulate_drag_drop_files(autosize_wrapper_locator, image_list)
+                    self.logger.info(f"[{self.req_id}] ✅ 通过拖放事件添加文件: {len(image_list)} 个")
+                    # 拖放后可能出现版权确认对话，需要点击“Agree to the copyright acknowledgement”
+                    try:
+                        acknow_btn_locator = self.page.locator('button[aria-label="Agree to the copyright acknowledgement"]')
+                        if await acknow_btn_locator.count() > 0:
+                            await acknow_btn_locator.click()
+                            self.logger.info(f"[{self.req_id}] 已点击版权确认按钮。")
+                            await asyncio.sleep(0.3)
+                    except Exception:
+                        pass
+                    # 如存在遮罩层（cdk overlay），尝试关闭以避免拦截点击
+                    try:
+                        overlay_backdrop = self.page.locator('div.cdk-overlay-backdrop.cdk-overlay-backdrop-showing')
+                        if await overlay_backdrop.count() > 0 and await overlay_backdrop.first.is_visible(timeout=500):
+                            self.logger.info(f"[{self.req_id}] 检测到遮罩层，尝试按 Escape 关闭...")
+                            try:
+                                await self.page.keyboard.press('Escape')
+                                await asyncio.sleep(0.2)
+                            except Exception:
+                                pass
+                            # 再次尝试确认按钮
+                            try:
+                                acknow_btn_locator = self.page.locator('button[aria-label="Agree to the copyright acknowledgement"]')
+                                if await acknow_btn_locator.count() > 0:
+                                    await acknow_btn_locator.click()
+                                    self.logger.info(f"[{self.req_id}] 遮罩层存在时再次点击版权确认。")
+                            except Exception:
+                                pass
+                            try:
+                                await expect_async(overlay_backdrop).to_be_hidden(timeout=2000)
+                                self.logger.info(f"[{self.req_id}] 遮罩层已隐藏。")
+                            except Exception:
+                                self.logger.warning(f"[{self.req_id}] 遮罩层未隐藏，后续点击可能被拦截。")
+                    except Exception:
+                        pass
+                except Exception as e_drag:
+                    self.logger.warning(f"[{self.req_id}] 拖放添加文件失败，尝试直接设置文件输入: {e_drag}")
+                    # 2) 尝试直接设置 input[type=file]
+                    uploaded = await self._try_direct_file_set(image_list)
+                    if not uploaded:
+                        # 3) 回退到原按钮+文件选择器流程
+                        try:
+                            function_btn_localtor = self.page.locator('button[aria-label="Insert assets such as images, videos, files, or audio"]')
+                            await function_btn_localtor.click()
+                            async with self.page.expect_file_chooser() as fc_info:
+                                upload_btn_localtor = self.page.locator(UPLOAD_BUTTON_SELECTOR)
+                                await upload_btn_localtor.click()
+                                self.logger.info(f"[{self.req_id}] 点击上传按钮，等待文件选择器...")
 
-                    # 3. 获取文件选择器对象
-                    file_chooser = await fc_info.value
-                    print("文件选择器已出现。")
+                            file_chooser = await fc_info.value
+                            await file_chooser.set_files(image_list)
+                            self.logger.info(f"[{self.req_id}] ✅ 通过文件选择器设置文件成功: {len(image_list)} 个")
 
-                    # 4. 设置要上传的文件
-                    await file_chooser.set_files(image_list)
-                    print(f"已将 '{image_list}' 设置到文件选择器。")
-
-                    #asyncio.sleep(0.2)
-                    acknow_btn_locator = self.page.locator('button[aria-label="Agree to the copyright acknowledgement"]')
-                    if await acknow_btn_locator.count() > 0:
-                        await acknow_btn_locator.click()
-
-                except Exception as e:
-                    print(f"在上传文件时发生错误: {e}")
+                            acknow_btn_locator = self.page.locator('button[aria-label="Agree to the copyright acknowledgement"]')
+                            if await acknow_btn_locator.count() > 0:
+                                await acknow_btn_locator.click()
+                        except Exception as e:
+                            self.logger.error(f"[{self.req_id}] 在上传文件时发生错误: {e}")
 
             # 等待发送按钮启用
             wait_timeout_ms_submit_enabled = 100000
@@ -743,6 +814,14 @@ class PageController:
             if not submitted_successfully:
                 self.logger.info(f"[{self.req_id}] 快捷键提交失败，尝试点击提交按钮...")
                 try:
+                    # 若遮罩层仍存在，尽力关闭
+                    try:
+                        overlay_backdrop = self.page.locator('div.cdk-overlay-backdrop.cdk-overlay-backdrop-showing')
+                        if await overlay_backdrop.count() > 0 and await overlay_backdrop.first.is_visible(timeout=300):
+                            await self.page.keyboard.press('Escape')
+                            await asyncio.sleep(0.2)
+                    except Exception:
+                        pass
                     await submit_button_locator.click(timeout=5000)
                     self.logger.info(f"[{self.req_id}] ✅ 提交按钮点击完成。")
                 except Exception as click_err:
@@ -758,6 +837,100 @@ class PageController:
                 await save_error_snapshot(f"input_submit_error_{self.req_id}")
             raise
 
+
+    async def _simulate_drag_drop_files(self, target_locator, files_list: List[str]) -> None:
+        """在指定目标元素及若干候选元素上模拟拖入多个本地文件。"""
+        # 读取文件并构造用于 JS 的负载（文件名、MIME、base64）
+        payloads = []
+        for path in files_list:
+            try:
+                with open(path, 'rb') as f:
+                    raw = f.read()
+                b64 = base64.b64encode(raw).decode('ascii')
+                mime, _ = mimetypes.guess_type(path)
+                payloads.append({
+                    'name': path.split('/')[-1],
+                    'mime': mime or 'application/octet-stream',
+                    'b64': b64,
+                })
+            except Exception as e:
+                self.logger.warning(f"[{self.req_id}] 读取文件失败，跳过拖放: {path} - {e}")
+
+        if not payloads:
+            raise Exception("无可用文件用于拖放")
+
+        # 候选拖放目标（从更具体到更广泛）
+        candidates = [
+            target_locator,
+            self.page.locator('ms-prompt-input-wrapper ms-autosize-textarea textarea'),
+            self.page.locator('ms-prompt-input-wrapper ms-autosize-textarea'),
+            self.page.locator('ms-prompt-input-wrapper'),
+        ]
+
+        last_err = None
+        for idx, cand in enumerate(candidates):
+            try:
+                await expect_async(cand).to_be_visible(timeout=3000)
+                await cand.evaluate(
+                    "(el, files) => {\n"
+                    "  const dt = new DataTransfer();\n"
+                    "  for (const p of files) {\n"
+                    "    const bstr = atob(p.b64);\n"
+                    "    const len = bstr.length;\n"
+                    "    const u8 = new Uint8Array(len);\n"
+                    "    for (let i=0;i<len;i++) u8[i] = bstr.charCodeAt(i);\n"
+                    "    const blob = new Blob([u8], { type: p.mime || 'application/octet-stream' });\n"
+                    "    const file = new File([blob], p.name, { type: p.mime || 'application/octet-stream' });\n"
+                    "    dt.items.add(file);\n"
+                    "  }\n"
+                    "  const evEnter = new DragEvent('dragenter', { bubbles: true, cancelable: true, dataTransfer: dt });\n"
+                    "  el.dispatchEvent(evEnter);\n"
+                    "  const evOver = new DragEvent('dragover', { bubbles: true, cancelable: true, dataTransfer: dt });\n"
+                    "  el.dispatchEvent(evOver);\n"
+                    "  const evDrop = new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: dt });\n"
+                    "  el.dispatchEvent(evDrop);\n"
+                    "}",
+                    payloads
+                )
+                # 给页面一点时间处理上传队列
+                await asyncio.sleep(0.6)
+                self.logger.info(f"[{self.req_id}] 拖放事件已在候选目标 {idx+1}/{len(candidates)} 上触发。")
+                return
+            except Exception as e_try:
+                last_err = e_try
+                continue
+
+        # 尝试在 document.body 上进行一次兜底拖放
+        try:
+            await self.page.evaluate(
+                "(files) => {\n"
+                "  const dt = new DataTransfer();\n"
+                "  for (const p of files) {\n"
+                "    const bstr = atob(p.b64);\n"
+                "    const len = bstr.length;\n"
+                "    const u8 = new Uint8Array(len);\n"
+                "    for (let i=0;i<len;i++) u8[i] = bstr.charCodeAt(i);\n"
+                "    const blob = new Blob([u8], { type: p.mime || 'application/octet-stream' });\n"
+                "    const file = new File([blob], p.name, { type: p.mime || 'application/octet-stream' });\n"
+                "    dt.items.add(file);\n"
+                "  }\n"
+                "  const el = document.body;\n"
+                "  const evEnter = new DragEvent('dragenter', { bubbles: true, cancelable: true, dataTransfer: dt });\n"
+                "  el.dispatchEvent(evEnter);\n"
+                "  const evOver = new DragEvent('dragover', { bubbles: true, cancelable: true, dataTransfer: dt });\n"
+                "  el.dispatchEvent(evOver);\n"
+                "  const evDrop = new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: dt });\n"
+                "  el.dispatchEvent(evDrop);\n"
+                "}",
+                payloads
+            )
+            await asyncio.sleep(0.6)
+            self.logger.info(f"[{self.req_id}] 拖放事件已在 document.body 上触发（兜底）。")
+            return
+        except Exception:
+            pass
+
+        raise last_err or Exception("拖放未能在任何候选目标上触发")
     async def _try_shortcut_submit(self, prompt_textarea_locator, check_client_disconnected: Callable) -> bool:
         """尝试使用快捷键提交"""
         import os

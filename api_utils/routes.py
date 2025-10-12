@@ -18,7 +18,11 @@ from pydantic import BaseModel
 from playwright.async_api import Page as AsyncPage
 
 # --- 配置模块导入 ---
-from config import *
+from config import (
+    DEFAULT_FALLBACK_MODEL_ID,
+    MODEL_NAME,
+    RESPONSE_COMPLETION_TIMEOUT,
+)
 
 # --- models模块导入 ---
 from models import ChatCompletionRequest, WebSocketConnectionManager
@@ -27,13 +31,31 @@ from models import ChatCompletionRequest, WebSocketConnectionManager
 from browser_utils import _handle_model_list_response
 
 # --- 依赖项导入 ---
-from .dependencies import *
+from .dependencies import (
+    get_logger,
+    get_current_ai_studio_model_id,
+    get_server_state,
+    get_worker_task,
+    get_request_queue,
+    get_model_list_fetch_event,
+    get_page_instance,
+    get_parsed_model_list,
+    get_excluded_model_ids,
+    get_processing_lock,
+    get_log_ws_manager,
+)
+
+# 统一的静态资源目录
+_BASE_DIR = os.path.join(os.path.dirname(__file__), "..")
+
+def _static_path(name: str) -> str:
+    return os.path.join(_BASE_DIR, name)
 
 
 # --- 静态文件端点 ---
 async def read_index(logger: logging.Logger = Depends(get_logger)):
     """返回主页面"""
-    index_html_path = os.path.join(os.path.dirname(__file__), "..", "index.html")
+    index_html_path = _static_path("index.html")
     if not os.path.exists(index_html_path):
         logger.error(f"index.html not found at {index_html_path}")
         raise HTTPException(status_code=404, detail="index.html not found")
@@ -42,7 +64,7 @@ async def read_index(logger: logging.Logger = Depends(get_logger)):
 
 async def get_css(logger: logging.Logger = Depends(get_logger)):
     """返回CSS文件"""
-    css_path = os.path.join(os.path.dirname(__file__), "..", "webui.css")
+    css_path = _static_path("webui.css")
     if not os.path.exists(css_path):
         logger.error(f"webui.css not found at {css_path}")
         raise HTTPException(status_code=404, detail="webui.css not found")
@@ -51,7 +73,7 @@ async def get_css(logger: logging.Logger = Depends(get_logger)):
 
 async def get_js(logger: logging.Logger = Depends(get_logger)):
     """返回JavaScript文件"""
-    js_path = os.path.join(os.path.dirname(__file__), "..", "webui.js")
+    js_path = _static_path("webui.js")
     if not os.path.exists(js_path):
         logger.error(f"webui.js not found at {js_path}")
         raise HTTPException(status_code=404, detail="webui.js not found")
@@ -65,7 +87,7 @@ async def get_api_info(request: Request, current_ai_studio_model_id: str = Depen
 
     server_port = request.url.port or os.environ.get('SERVER_PORT_INFO', '8000')
     host = request.headers.get('host') or f"127.0.0.1:{server_port}"
-    scheme = request.headers.get('x-forwarded-proto', 'http')
+    scheme = request.headers.get('x-forwarded-proto') or request.url.scheme or 'http'
     base_url = f"{scheme}://{host}"
     api_base = f"{base_url}/v1"
     effective_model_name = current_ai_studio_model_id or MODEL_NAME
@@ -97,7 +119,7 @@ async def health_check(
     worker_task = Depends(get_worker_task),
     request_queue: Queue = Depends(get_request_queue)
 ):
-    """健康检查"""
+    """健康检查：汇总核心组件状态并返回简明描述。"""
     is_worker_running = bool(worker_task and not worker_task.done())
     launch_mode = os.environ.get('LAUNCH_MODE', 'unknown')
     browser_page_critical = launch_mode != "direct_debug_no_browser"
@@ -110,6 +132,7 @@ async def health_check(
     status_val = "OK" if is_core_ready and is_worker_running else "Error"
     q_size = request_queue.qsize() if request_queue else -1
     
+    # 聚合问题描述，便于诊断
     status_message_parts = []
     if server_state["is_initializing"]: status_message_parts.append("初始化进行中")
     if not server_state["is_playwright_ready"]: status_message_parts.append("Playwright 未就绪")
@@ -118,6 +141,7 @@ async def health_check(
         if not server_state["is_page_ready"]: status_message_parts.append("页面未就绪")
     if not is_worker_running: status_message_parts.append("Worker 未运行")
     
+    # 标准化返回体
     status = {
         "status": status_val,
         "message": "",
@@ -155,7 +179,10 @@ async def list_models(
                 model_list_fetch_event.set()
     
     if parsed_model_list:
-        final_model_list = [m for m in parsed_model_list if m.get("id") not in excluded_model_ids]
+        final_model_list = [
+            m for m in parsed_model_list
+            if isinstance(m, dict) and m.get("id") not in excluded_model_ids
+        ]
         return {"object": "list", "data": final_model_list}
     else:
         logger.warning("模型列表为空，返回默认后备模型。")
@@ -177,6 +204,7 @@ async def chat_completions(
     """处理聊天完成请求"""
     req_id = ''.join(random.choices('abcdefghijklmnopqrstuvwxyz0123456789', k=7))
     logger.info(f"[{req_id}] 收到 /v1/chat/completions 请求 (Stream={request.stream})")
+    # 之前的完整请求体调试日志已移除，避免冗余与敏感信息泄漏
     
     launch_mode = os.environ.get('LAUNCH_MODE', 'unknown')
     browser_page_critical = launch_mode != "direct_debug_no_browser"
@@ -254,7 +282,11 @@ async def get_queue_status(
     processing_lock: Lock = Depends(get_processing_lock)
 ):
     """获取队列状态"""
-    queue_items = list(request_queue._queue)
+    # 直接访问 _queue 是非公开API；尽量容错处理
+    try:
+        queue_items = list(request_queue._queue)
+    except Exception:
+        queue_items = []
     return JSONResponse(content={
         "queue_length": len(queue_items),
         "is_processing_locked": processing_lock.locked(),

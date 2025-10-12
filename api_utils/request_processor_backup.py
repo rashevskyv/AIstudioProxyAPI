@@ -16,7 +16,13 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from playwright.async_api import Page as AsyncPage, Locator, Error as PlaywrightAsyncError, expect as expect_async, TimeoutError
 
 # --- 配置模块导入 ---
-from config import *
+from config import (
+    MODEL_NAME,
+    INPUT_SELECTOR,
+    SUBMIT_BUTTON_SELECTOR,
+)
+# 为避免某些语言服务器的导出静态分析问题，直接从子模块导入该常量
+from config.constants import CHAT_COMPLETION_ID_PREFIX
 
 # --- models模块导入 ---
 from models import ChatCompletionRequest, ClientDisconnectedError

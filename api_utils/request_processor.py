@@ -8,7 +8,7 @@ import json
 import os
 import random
 import time
-from typing import Optional, Tuple, Callable, AsyncGenerator
+from typing import Optional, Tuple, Callable, AsyncGenerator, List, Any
 from asyncio import Event, Future
 
 from fastapi import HTTPException, Request
@@ -16,7 +16,10 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from playwright.async_api import Page as AsyncPage, Locator, Error as PlaywrightAsyncError, expect as expect_async
 
 # --- 配置模块导入 ---
-from config import *
+from config import (
+    MODEL_NAME,
+    SUBMIT_BUTTON_SELECTOR,
+)
 
 # --- models模块导入 ---
 from models import ChatCompletionRequest, ClientDisconnectedError
@@ -31,157 +34,38 @@ from browser_utils import (
 from .utils import (
     validate_chat_request,
     prepare_combined_prompt,
-    generate_sse_chunk,
-    generate_sse_stop_chunk,
     use_stream_response,
-    calculate_usage_stats
+    calculate_usage_stats,
+    maybe_execute_tools,
 )
 from browser_utils.page_controller import PageController
+from .context_types import RequestContext
+from .response_generators import gen_sse_from_aux_stream, gen_sse_from_playwright
+from .response_payloads import build_chat_completion_response_json
+from .model_switching import analyze_model_requirements as ms_analyze, handle_model_switching as ms_switch, handle_parameter_cache as ms_param_cache
+from .page_response import locate_response_elements
+
+from .common_utils import random_id as _random_id
+from .client_connection import (
+    test_client_connection as _test_client_connection,
+    setup_disconnect_monitoring as _setup_disconnect_monitoring,
+)
+from .context_init import initialize_request_context as _init_request_context
+
+_initialize_request_context = _init_request_context
 
 
-async def _initialize_request_context(req_id: str, request: ChatCompletionRequest) -> dict:
-    """初始化请求上下文"""
-    from server import (
-        logger, page_instance, is_page_ready, parsed_model_list,
-        current_ai_studio_model_id, model_switching_lock, page_params_cache,
-        params_cache_lock
-    )
-    
-    logger.info(f"[{req_id}] 开始处理请求...")
-    logger.info(f"[{req_id}]   请求参数 - Model: {request.model}, Stream: {request.stream}")
-    
-    context = {
-        'logger': logger,
-        'page': page_instance,
-        'is_page_ready': is_page_ready,
-        'parsed_model_list': parsed_model_list,
-        'current_ai_studio_model_id': current_ai_studio_model_id,
-        'model_switching_lock': model_switching_lock,
-        'page_params_cache': page_params_cache,
-        'params_cache_lock': params_cache_lock,
-        'is_streaming': request.stream,
-        'model_actually_switched': False,
-        'requested_model': request.model,
-        'model_id_to_use': None,
-        'needs_model_switching': False
-    }
-    
-    return context
+async def _analyze_model_requirements(req_id: str, context: RequestContext, request: ChatCompletionRequest) -> RequestContext:
+    """代理到 model_switching.analyze_model_requirements"""
+    return await ms_analyze(req_id, context, request.model, MODEL_NAME)
 
 
-async def _analyze_model_requirements(req_id: str, context: dict, request: ChatCompletionRequest) -> dict:
-    """分析模型需求并确定是否需要切换"""
-    logger = context['logger']
-    current_ai_studio_model_id = context['current_ai_studio_model_id']
-    parsed_model_list = context['parsed_model_list']
-    requested_model = request.model
-    
-    if requested_model and requested_model != MODEL_NAME:
-        requested_model_id = requested_model.split('/')[-1]
-        logger.info(f"[{req_id}] 请求使用模型: {requested_model_id}")
-        
-        if parsed_model_list:
-            valid_model_ids = [m.get("id") for m in parsed_model_list]
-            if requested_model_id not in valid_model_ids:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"[{req_id}] Invalid model '{requested_model_id}'. Available models: {', '.join(valid_model_ids)}"
-                )
-        
-        context['model_id_to_use'] = requested_model_id
-        if current_ai_studio_model_id != requested_model_id:
-            context['needs_model_switching'] = True
-            logger.info(f"[{req_id}] 需要切换模型: 当前={current_ai_studio_model_id} -> 目标={requested_model_id}")
-    
-    return context
+# 直接使用导入的实现
+
+# 直接使用导入的实现
 
 
-async def _test_client_connection(req_id: str, http_request: Request) -> bool:
-    """通过发送测试数据包来主动检测客户端连接状态"""
-    try:
-        # 尝试发送一个小的测试数据包
-        test_chunk = "data: {\"type\":\"ping\"}\n\n"
-
-        # 获取底层的响应对象
-        if hasattr(http_request, '_receive'):
-            # 检查接收通道是否还活跃
-            try:
-                # 尝试非阻塞地检查是否有断开消息
-                import asyncio
-                receive_task = asyncio.create_task(http_request._receive())
-                done, pending = await asyncio.wait([receive_task], timeout=0.01)
-
-                if done:
-                    message = receive_task.result()
-                    if message.get("type") == "http.disconnect":
-                        return False
-                else:
-                    # 取消未完成的任务
-                    receive_task.cancel()
-                    try:
-                        await receive_task
-                    except asyncio.CancelledError:
-                        pass
-
-            except Exception:
-                # 如果检查过程中出现异常，可能表示连接有问题
-                return False
-
-        # 如果上述检查都通过，认为连接正常
-        return True
-
-    except Exception as e:
-        # 任何异常都认为连接已断开
-        return False
-
-async def _setup_disconnect_monitoring(req_id: str, http_request: Request, result_future: Future) -> Tuple[Event, asyncio.Task, Callable]:
-    """设置客户端断开连接监控"""
-    from server import logger
-
-    client_disconnected_event = Event()
-
-    async def check_disconnect_periodically():
-        while not client_disconnected_event.is_set():
-            try:
-                # 使用主动检测方法
-                is_connected = await _test_client_connection(req_id, http_request)
-                if not is_connected:
-                    logger.info(f"[{req_id}] 主动检测到客户端断开连接。")
-                    client_disconnected_event.set()
-                    if not result_future.done():
-                        result_future.set_exception(HTTPException(status_code=499, detail=f"[{req_id}] 客户端关闭了请求"))
-                    break
-
-                # 备用检查：使用原有的is_disconnected方法
-                if await http_request.is_disconnected():
-                    logger.info(f"[{req_id}] 备用检测到客户端断开连接。")
-                    client_disconnected_event.set()
-                    if not result_future.done():
-                        result_future.set_exception(HTTPException(status_code=499, detail=f"[{req_id}] 客户端关闭了请求"))
-                    break
-
-                await asyncio.sleep(0.3)  # 更频繁的检查间隔，从0.5秒改为0.3秒
-            except asyncio.CancelledError:
-                break
-            except Exception as e:
-                logger.error(f"[{req_id}] (Disco Check Task) 错误: {e}")
-                client_disconnected_event.set()
-                if not result_future.done():
-                    result_future.set_exception(HTTPException(status_code=500, detail=f"[{req_id}] Internal disconnect checker error: {e}"))
-                break
-
-    disconnect_check_task = asyncio.create_task(check_disconnect_periodically())
-
-    def check_client_disconnected(stage: str = ""):
-        if client_disconnected_event.is_set():
-            logger.info(f"[{req_id}] 在 '{stage}' 检测到客户端断开连接。")
-            raise ClientDisconnectedError(f"[{req_id}] Client disconnected at stage: {stage}")
-        return False
-
-    return client_disconnected_event, disconnect_check_task, check_client_disconnected
-
-
-async def _validate_page_status(req_id: str, context: dict, check_client_disconnected: Callable) -> None:
+async def _validate_page_status(req_id: str, context: RequestContext, check_client_disconnected: Callable) -> None:
     """验证页面状态"""
     page = context['page']
     is_page_ready = context['is_page_ready']
@@ -192,31 +76,9 @@ async def _validate_page_status(req_id: str, context: dict, check_client_disconn
     check_client_disconnected("Initial Page Check")
 
 
-async def _handle_model_switching(req_id: str, context: dict, check_client_disconnected: Callable) -> dict:
-    """处理模型切换逻辑"""
-    if not context['needs_model_switching']:
-        return context
-    
-    logger = context['logger']
-    page = context['page']
-    model_switching_lock = context['model_switching_lock']
-    model_id_to_use = context['model_id_to_use']
-    
-    import server
-    
-    async with model_switching_lock:
-        if server.current_ai_studio_model_id != model_id_to_use:
-            logger.info(f"[{req_id}] 准备切换模型: {server.current_ai_studio_model_id} -> {model_id_to_use}")
-            switch_success = await switch_ai_studio_model(page, model_id_to_use, req_id)
-            if switch_success:
-                server.current_ai_studio_model_id = model_id_to_use
-                context['model_actually_switched'] = True
-                context['current_ai_studio_model_id'] = model_id_to_use
-                logger.info(f"[{req_id}] ✅ 模型切换成功: {server.current_ai_studio_model_id}")
-            else:
-                await _handle_model_switch_failure(req_id, page, model_id_to_use, server.current_ai_studio_model_id, logger)
-    
-    return context
+async def _handle_model_switching(req_id: str, context: RequestContext, check_client_disconnected: Callable) -> RequestContext:
+    """代理到 model_switching.handle_model_switching"""
+    return await ms_switch(req_id, context)
 
 
 async def _handle_model_switch_failure(req_id: str, page: AsyncPage, model_id_to_use: str, model_before_switch: str, logger) -> None:
@@ -233,38 +95,47 @@ async def _handle_model_switch_failure(req_id: str, page: AsyncPage, model_id_to
     )
 
 
-async def _handle_parameter_cache(req_id: str, context: dict) -> None:
-    """处理参数缓存"""
-    logger = context['logger']
-    params_cache_lock = context['params_cache_lock']
-    page_params_cache = context['page_params_cache']
-    current_ai_studio_model_id = context['current_ai_studio_model_id']
-    model_actually_switched = context['model_actually_switched']
-    
-    async with params_cache_lock:
-        cached_model_for_params = page_params_cache.get("last_known_model_id_for_params")
-        
-        if model_actually_switched or (current_ai_studio_model_id != cached_model_for_params):
-            logger.info(f"[{req_id}] 模型已更改，参数缓存失效。")
-            page_params_cache.clear()
-            page_params_cache["last_known_model_id_for_params"] = current_ai_studio_model_id
+async def _handle_parameter_cache(req_id: str, context: RequestContext) -> None:
+    """代理到 model_switching.handle_parameter_cache"""
+    await ms_param_cache(req_id, context)
 
 
-async def _prepare_and_validate_request(req_id: str, request: ChatCompletionRequest, check_client_disconnected: Callable) -> str:
-    """准备和验证请求"""
+async def _prepare_and_validate_request(
+    req_id: str,
+    request: ChatCompletionRequest,
+    check_client_disconnected: Callable,
+) -> Tuple[str, List[Optional[str]]]:
+    """准备和验证请求，返回 (组合提示, 图片路径列表)。"""
     try:
         validate_chat_request(request.messages, req_id)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=f"[{req_id}] 无效请求: {e}")
     
-    prepared_prompt = prepare_combined_prompt(request.messages, req_id)
+    prepared_prompt, images_list = prepare_combined_prompt(request.messages, req_id)
+    # 基于 tools/tool_choice 的主动函数执行
+    tool_exec_results = maybe_execute_tools(request.messages, request.tools, getattr(request, 'tool_choice', None))
     check_client_disconnected("After Prompt Prep")
-    
-    return prepared_prompt
+    # 将结果内联到提示末尾，供网页端一并提交
+    if tool_exec_results:
+        try:
+            for res in tool_exec_results:
+                name = res.get('name')
+                args = res.get('arguments')
+                result_str = res.get('result')
+                prepared_prompt += f"\n---\n工具执行: {name}\n参数:\n{args}\n结果:\n{result_str}\n"
+        except Exception:
+            pass
+    return prepared_prompt, images_list
 
-async def _handle_response_processing(req_id: str, request: ChatCompletionRequest, page: AsyncPage,
-                                    context: dict, result_future: Future,
-                                    submit_button_locator: Locator, check_client_disconnected: Callable) -> Optional[Tuple[Event, Locator, Callable]]:
+async def _handle_response_processing(
+    req_id: str,
+    request: ChatCompletionRequest,
+    page: AsyncPage,
+    context: RequestContext,
+    result_future: Future,
+    submit_button_locator: Locator,
+    check_client_disconnected: Callable,
+) -> Optional[Tuple[Event, Locator, Callable]]:
     """处理响应生成"""
     from server import logger
     
@@ -281,253 +152,37 @@ async def _handle_response_processing(req_id: str, request: ChatCompletionReques
         return await _handle_playwright_response(req_id, request, page, context, result_future, submit_button_locator, check_client_disconnected)
 
 
-async def _handle_auxiliary_stream_response(req_id: str, request: ChatCompletionRequest, context: dict, 
-                                          result_future: Future, submit_button_locator: Locator, 
-                                          check_client_disconnected: Callable) -> Optional[Tuple[Event, Locator, Callable]]:
-    """使用辅助流处理响应"""
+async def _handle_auxiliary_stream_response(
+    req_id: str,
+    request: ChatCompletionRequest,
+    context: RequestContext,
+    result_future: Future,
+    submit_button_locator: Locator,
+    check_client_disconnected: Callable,
+) -> Optional[Tuple[Event, Locator, Callable]]:
+    """辅助流响应处理路径：负责将 STREAM_QUEUE 的数据转换为 OpenAI 兼容 SSE/JSON。
+
+    - 流式模式：返回 StreamingResponse，逐步推送 delta 与最终 usage。
+    - 非流式模式：聚合最终内容与函数调用，返回 JSONResponse。
+    """
     from server import logger
     
     is_streaming = request.stream
     current_ai_studio_model_id = context.get('current_ai_studio_model_id')
     
-    def generate_random_string(length):
-        charset = "abcdefghijklmnopqrstuvwxyz0123456789"
-        return ''.join(random.choice(charset) for _ in range(length))
+    # 兼容旧逻辑的随机ID函数移除，统一使用 _random_id()
 
     if is_streaming:
         try:
             completion_event = Event()
-            
-            async def create_stream_generator_from_helper(event_to_set: Event) -> AsyncGenerator[str, None]:
-                last_reason_pos = 0
-                last_body_pos = 0
-                model_name_for_stream = current_ai_studio_model_id or MODEL_NAME
-                chat_completion_id = f"{CHAT_COMPLETION_ID_PREFIX}{req_id}-{int(time.time())}-{random.randint(100, 999)}"
-                created_timestamp = int(time.time())
-
-                # 用于收集完整内容以计算usage
-                full_reasoning_content = ""
-                full_body_content = ""
-
-                # 数据接收状态标记
-                data_receiving = False
-
-                try:
-                    async for raw_data in use_stream_response(req_id):
-                        # 标记数据接收状态
-                        data_receiving = True
-
-                        # 检查客户端是否断开连接
-                        try:
-                            check_client_disconnected(f"流式生成器循环 ({req_id}): ")
-                        except ClientDisconnectedError:
-                            logger.info(f"[{req_id}] 客户端断开连接，终止流式生成")
-                            # 如果正在接收数据时客户端断开，立即设置done信号
-                            if data_receiving and not event_to_set.is_set():
-                                logger.info(f"[{req_id}] 数据接收中客户端断开，立即设置done信号")
-                                event_to_set.set()
-                            break
-                        
-                        # 确保 data 是字典类型
-                        if isinstance(raw_data, str):
-                            try:
-                                data = json.loads(raw_data)
-                            except json.JSONDecodeError:
-                                logger.warning(f"[{req_id}] 无法解析流数据JSON: {raw_data}")
-                                continue
-                        elif isinstance(raw_data, dict):
-                            data = raw_data
-                        else:
-                            logger.warning(f"[{req_id}] 未知的流数据类型: {type(raw_data)}")
-                            continue
-                        
-                        # 确保必要的键存在
-                        if not isinstance(data, dict):
-                            logger.warning(f"[{req_id}] 数据不是字典类型: {data}")
-                            continue
-                        
-                        reason = data.get("reason", "")
-                        body = data.get("body", "")
-                        done = data.get("done", False)
-                        function = data.get("function", [])
-                        
-                        # 更新完整内容记录
-                        if reason:
-                            full_reasoning_content = reason
-                        if body:
-                            full_body_content = body
-                        
-                        # 处理推理内容
-                        if len(reason) > last_reason_pos:
-                            output = {
-                                "id": chat_completion_id,
-                                "object": "chat.completion.chunk",
-                                "model": model_name_for_stream,
-                                "created": created_timestamp,
-                                "choices":[{
-                                    "index": 0,
-                                    "delta":{
-                                        "role": "assistant",
-                                        "content": None,
-                                        "reasoning_content": reason[last_reason_pos:],
-                                    },
-                                    "finish_reason": None,
-                                    "native_finish_reason": None,
-                                }]
-                            }
-                            last_reason_pos = len(reason)
-                            yield f"data: {json.dumps(output, ensure_ascii=False, separators=(',', ':'))}\n\n"
-                        
-                        # 处理主体内容
-                        if len(body) > last_body_pos:
-                            finish_reason_val = None
-                            if done:
-                                finish_reason_val = "stop"
-                            
-                            delta_content = {"role": "assistant", "content": body[last_body_pos:]}
-                            choice_item = {
-                                "index": 0,
-                                "delta": delta_content,
-                                "finish_reason": finish_reason_val,
-                                "native_finish_reason": finish_reason_val,
-                            }
-
-                            if done and function and len(function) > 0:
-                                tool_calls_list = []
-                                for func_idx, function_call_data in enumerate(function):
-                                    tool_calls_list.append({
-                                        "id": f"call_{generate_random_string(24)}",
-                                        "index": func_idx,
-                                        "type": "function",
-                                        "function": {
-                                            "name": function_call_data["name"],
-                                            "arguments": json.dumps(function_call_data["params"]),
-                                        },
-                                    })
-                                delta_content["tool_calls"] = tool_calls_list
-                                choice_item["finish_reason"] = "tool_calls"
-                                choice_item["native_finish_reason"] = "tool_calls"
-                                delta_content["content"] = None
-
-                            output = {
-                                "id": chat_completion_id,
-                                "object": "chat.completion.chunk",
-                                "model": model_name_for_stream,
-                                "created": created_timestamp,
-                                "choices": [choice_item]
-                            }
-                            last_body_pos = len(body)
-                            yield f"data: {json.dumps(output, ensure_ascii=False, separators=(',', ':'))}\n\n"
-                        
-                        # 处理只有done=True但没有新内容的情况（仅有函数调用或纯结束）
-                        elif done:
-                            # 如果有函数调用但没有新的body内容
-                            if function and len(function) > 0:
-                                delta_content = {"role": "assistant", "content": None}
-                                tool_calls_list = []
-                                for func_idx, function_call_data in enumerate(function):
-                                    tool_calls_list.append({
-                                        "id": f"call_{generate_random_string(24)}",
-                                        "index": func_idx,
-                                        "type": "function",
-                                        "function": {
-                                            "name": function_call_data["name"],
-                                            "arguments": json.dumps(function_call_data["params"]),
-                                        },
-                                    })
-                                delta_content["tool_calls"] = tool_calls_list
-                                choice_item = {
-                                    "index": 0,
-                                    "delta": delta_content,
-                                    "finish_reason": "tool_calls",
-                                    "native_finish_reason": "tool_calls",
-                                }
-                            else:
-                                # 纯结束，没有新内容和函数调用
-                                choice_item = {
-                                    "index": 0,
-                                    "delta": {"role": "assistant"},
-                                    "finish_reason": "stop",
-                                    "native_finish_reason": "stop",
-                                }
-
-                            output = {
-                                "id": chat_completion_id,
-                                "object": "chat.completion.chunk",
-                                "model": model_name_for_stream,
-                                "created": created_timestamp,
-                                "choices": [choice_item]
-                            }
-                            yield f"data: {json.dumps(output, ensure_ascii=False, separators=(',', ':'))}\n\n"
-                
-                except ClientDisconnectedError:
-                    logger.info(f"[{req_id}] 流式生成器中检测到客户端断开连接")
-                    # 客户端断开时立即设置done信号
-                    if data_receiving and not event_to_set.is_set():
-                        logger.info(f"[{req_id}] 客户端断开异常处理中立即设置done信号")
-                        event_to_set.set()
-                except Exception as e:
-                    logger.error(f"[{req_id}] 流式生成器处理过程中发生错误: {e}", exc_info=True)
-                    # 发送错误信息给客户端
-                    try:
-                        error_chunk = {
-                            "id": chat_completion_id,
-                            "object": "chat.completion.chunk",
-                            "model": model_name_for_stream,
-                            "created": created_timestamp,
-                            "choices": [{
-                                "index": 0,
-                                "delta": {"role": "assistant", "content": f"\n\n[错误: {str(e)}]"},
-                                "finish_reason": "stop",
-                                "native_finish_reason": "stop",
-                            }]
-                        }
-                        yield f"data: {json.dumps(error_chunk, ensure_ascii=False, separators=(',', ':'))}\n\n"
-                    except Exception:
-                        pass  # 如果无法发送错误信息，继续处理结束逻辑
-                finally:
-                    # 计算usage统计
-                    try:
-                        usage_stats = calculate_usage_stats(
-                            [msg.model_dump() for msg in request.messages],
-                            full_body_content,
-                            full_reasoning_content
-                        )
-                        logger.info(f"[{req_id}] 计算的token使用统计: {usage_stats}")
-                        
-                        # 发送带usage的最终chunk
-                        final_chunk = {
-                            "id": chat_completion_id,
-                            "object": "chat.completion.chunk",
-                            "model": model_name_for_stream,
-                            "created": created_timestamp,
-                            "choices": [{
-                                "index": 0,
-                                "delta": {},
-                                "finish_reason": "stop",
-                                "native_finish_reason": "stop"
-                            }],
-                            "usage": usage_stats
-                        }
-                        yield f"data: {json.dumps(final_chunk, ensure_ascii=False, separators=(',', ':'))}\n\n"
-                        logger.info(f"[{req_id}] 已发送带usage统计的最终chunk")
-                        
-                    except Exception as usage_err:
-                        logger.error(f"[{req_id}] 计算或发送usage统计时出错: {usage_err}")
-                    
-                    # 确保总是发送 [DONE] 标记
-                    try:
-                        logger.info(f"[{req_id}] 流式生成器完成，发送 [DONE] 标记")
-                        yield "data: [DONE]\n\n"
-                    except Exception as done_err:
-                        logger.error(f"[{req_id}] 发送 [DONE] 标记时出错: {done_err}")
-                    
-                    # 确保事件被设置
-                    if not event_to_set.is_set():
-                        event_to_set.set()
-                        logger.info(f"[{req_id}] 流式生成器完成事件已设置")
-
-            stream_gen_func = create_stream_generator_from_helper(completion_event)
+            # 使用生成器作为响应体，交由 FastAPI 进行 SSE 推送
+            stream_gen_func = gen_sse_from_aux_stream(
+                req_id,
+                request,
+                current_ai_studio_model_id or MODEL_NAME,
+                check_client_disconnected,
+                completion_event,
+            )
             if not result_future.done():
                 result_future.set_result(StreamingResponse(stream_gen_func, media_type="text/event-stream"))
             else:
@@ -548,6 +203,7 @@ async def _handle_auxiliary_stream_response(req_id: str, request: ChatCompletion
         functions = None
         final_data_from_aux_stream = None
 
+        # 非流式：消费辅助队列的最终结果并组装 JSON 响应
         async for raw_data in use_stream_response(req_id):
             check_client_disconnected(f"非流式辅助流 - 循环中 ({req_id}): ")
             
@@ -592,7 +248,7 @@ async def _handle_auxiliary_stream_response(req_id: str, request: ChatCompletion
             tool_calls_list = []
             for func_idx, function_call_data in enumerate(functions):
                 tool_calls_list.append({
-                    "id": f"call_{generate_random_string(24)}",
+                    "id": f"call_{_random_id()}",
                     "index": func_idx,
                     "type": "function",
                     "function": {
@@ -603,30 +259,26 @@ async def _handle_auxiliary_stream_response(req_id: str, request: ChatCompletion
             message_payload["tool_calls"] = tool_calls_list
             finish_reason_val = "tool_calls"
             message_payload["content"] = None
-        
+
         if reasoning_content:
             message_payload["reasoning_content"] = reasoning_content
 
-        # 计算token使用统计
         usage_stats = calculate_usage_stats(
             [msg.model_dump() for msg in request.messages],
             content or "",
-            reasoning_content
+            reasoning_content,
         )
 
-        response_payload = {
-            "id": f"{CHAT_COMPLETION_ID_PREFIX}{req_id}-{int(time.time())}",
-            "object": "chat.completion",
-            "created": int(time.time()),
-            "model": model_name_for_json,
-            "choices": [{
-                "index": 0,
-                "message": message_payload,
-                "finish_reason": finish_reason_val,
-                "native_finish_reason": finish_reason_val,
-            }],
-            "usage": usage_stats
-        }
+        response_payload = build_chat_completion_response_json(
+            req_id,
+            model_name_for_json,
+            message_payload,
+            finish_reason_val,
+            usage_stats,
+            system_fingerprint="camoufox-proxy",
+            seed=request.seed if hasattr(request, 'seed') else None,
+            response_format=(request.response_format if hasattr(request, 'response_format') else None),
+        )
 
         if not result_future.done():
             result_future.set_result(JSONResponse(content=response_payload))
@@ -642,103 +294,21 @@ async def _handle_playwright_response(req_id: str, request: ChatCompletionReques
     is_streaming = request.stream
     current_ai_studio_model_id = context.get('current_ai_studio_model_id')
     
-    logger.info(f"[{req_id}] 定位响应元素...")
-    response_container = page.locator(RESPONSE_CONTAINER_SELECTOR).last
-    response_element = response_container.locator(RESPONSE_TEXT_SELECTOR)
-    
-    try:
-        await expect_async(response_container).to_be_attached(timeout=20000)
-        check_client_disconnected("After Response Container Attached: ")
-        await expect_async(response_element).to_be_attached(timeout=90000)
-        logger.info(f"[{req_id}] 响应元素已定位。")
-    except (PlaywrightAsyncError, asyncio.TimeoutError, ClientDisconnectedError) as locate_err:
-        if isinstance(locate_err, ClientDisconnectedError):
-            raise
-        logger.error(f"[{req_id}] ❌ 错误: 定位响应元素失败或超时: {locate_err}")
-        await save_error_snapshot(f"response_locate_error_{req_id}")
-        raise HTTPException(status_code=502, detail=f"[{req_id}] 定位AI Studio响应元素失败: {locate_err}")
-    except Exception as locate_exc:
-        logger.exception(f"[{req_id}] ❌ 错误: 定位响应元素时意外错误")
-        await save_error_snapshot(f"response_locate_unexpected_{req_id}")
-        raise HTTPException(status_code=500, detail=f"[{req_id}] 定位响应元素时意外错误: {locate_exc}")
+    await locate_response_elements(page, req_id, logger, check_client_disconnected)
 
     check_client_disconnected("After Response Element Located: ")
 
     if is_streaming:
         completion_event = Event()
-
-        async def create_response_stream_generator():
-            # 数据接收状态标记
-            data_receiving = False
-
-            try:
-                # 使用PageController获取响应
-                page_controller = PageController(page, logger, req_id)
-                final_content = await page_controller.get_response(check_client_disconnected)
-
-                # 标记数据接收状态
-                data_receiving = True
-
-                # 生成流式响应 - 保持Markdown格式
-                # 按行分割以保持换行符和Markdown结构
-                lines = final_content.split('\n')
-                for line_idx, line in enumerate(lines):
-                    # 检查客户端是否断开连接
-                    try:
-                        check_client_disconnected(f"Playwright流式生成器循环 ({req_id}): ")
-                    except ClientDisconnectedError:
-                        logger.info(f"[{req_id}] Playwright流式生成器中检测到客户端断开连接")
-                        # 如果正在接收数据时客户端断开，立即设置done信号
-                        if data_receiving and not completion_event.is_set():
-                            logger.info(f"[{req_id}] Playwright数据接收中客户端断开，立即设置done信号")
-                            completion_event.set()
-                        break
-
-                    # 输出当前行的内容（包括空行，以保持Markdown格式）
-                    if line:  # 非空行按字符分块输出
-                        chunk_size = 5  # 每次输出5个字符，平衡速度和体验
-                        for i in range(0, len(line), chunk_size):
-                            chunk = line[i:i+chunk_size]
-                            yield generate_sse_chunk(chunk, req_id, current_ai_studio_model_id or MODEL_NAME)
-                            await asyncio.sleep(0.03)  # 适中的输出速度
-
-                    # 添加换行符（除了最后一行）
-                    if line_idx < len(lines) - 1:
-                        yield generate_sse_chunk('\n', req_id, current_ai_studio_model_id or MODEL_NAME)
-                        await asyncio.sleep(0.01)
-                
-                # 计算并发送带usage的完成块
-                usage_stats = calculate_usage_stats(
-                    [msg.model_dump() for msg in request.messages],
-                    final_content,
-                    ""  # Playwright模式没有reasoning content
-                )
-                logger.info(f"[{req_id}] Playwright非流式计算的token使用统计: {usage_stats}")
-                
-                # 发送带usage的完成块
-                yield generate_sse_stop_chunk(req_id, current_ai_studio_model_id or MODEL_NAME, "stop", usage_stats)
-                
-            except ClientDisconnectedError:
-                logger.info(f"[{req_id}] Playwright流式生成器中检测到客户端断开连接")
-                # 客户端断开时立即设置done信号
-                if data_receiving and not completion_event.is_set():
-                    logger.info(f"[{req_id}] Playwright客户端断开异常处理中立即设置done信号")
-                    completion_event.set()
-            except Exception as e:
-                logger.error(f"[{req_id}] Playwright流式生成器处理过程中发生错误: {e}", exc_info=True)
-                # 发送错误信息给客户端
-                try:
-                    yield generate_sse_chunk(f"\n\n[错误: {str(e)}]", req_id, current_ai_studio_model_id or MODEL_NAME)
-                    yield generate_sse_stop_chunk(req_id, current_ai_studio_model_id or MODEL_NAME)
-                except Exception:
-                    pass  # 如果无法发送错误信息，继续处理结束逻辑
-            finally:
-                # 确保事件被设置
-                if not completion_event.is_set():
-                    completion_event.set()
-                    logger.info(f"[{req_id}] Playwright流式生成器完成事件已设置")
-
-        stream_gen_func = create_response_stream_generator()
+        stream_gen_func = gen_sse_from_playwright(
+            page,
+            logger,
+            req_id,
+            current_ai_studio_model_id or MODEL_NAME,
+            request,
+            check_client_disconnected,
+            completion_event,
+        )
         if not result_future.done():
             result_future.set_result(StreamingResponse(stream_gen_func, media_type="text/event-stream"))
         
@@ -755,19 +325,21 @@ async def _handle_playwright_response(req_id: str, request: ChatCompletionReques
             ""  # Playwright模式没有reasoning content
         )
         logger.info(f"[{req_id}] Playwright非流式计算的token使用统计: {usage_stats}")
-        
-        response_payload = {
-            "id": f"{CHAT_COMPLETION_ID_PREFIX}{req_id}-{int(time.time())}",
-            "object": "chat.completion",
-            "created": int(time.time()),
-            "model": current_ai_studio_model_id or MODEL_NAME,
-            "choices": [{
-                "index": 0,
-                "message": {"role": "assistant", "content": final_content},
-                "finish_reason": "stop"
-            }],
-            "usage": usage_stats
-        }
+
+        # 统一使用构造器生成 OpenAI 兼容响应
+        model_name_for_json = current_ai_studio_model_id or MODEL_NAME
+        message_payload = {"role": "assistant", "content": final_content}
+        finish_reason_val = "stop"
+        response_payload = build_chat_completion_response_json(
+            req_id,
+            model_name_for_json,
+            message_payload,
+            finish_reason_val,
+            usage_stats,
+            system_fingerprint="camoufox-proxy",
+            seed=request.seed if hasattr(request, 'seed') else None,
+            response_format=(request.response_format if hasattr(request, 'response_format') else None),
+        )
         
         if not result_future.done():
             result_future.set_result(JSONResponse(content=response_payload))
@@ -834,6 +406,61 @@ async def _process_request_refactored(
         await _handle_parameter_cache(req_id, context)
         
         prepared_prompt,image_list = await _prepare_and_validate_request(req_id, request, check_client_disconnected)
+        # 兼容: 顶层与消息级附件字段合并到上传列表（仅 data:/file:/绝对路径）
+        try:
+            top_level_atts = getattr(request, 'attachments', None)
+            if isinstance(top_level_atts, list) and len(top_level_atts) > 0:
+                from api_utils.utils import extract_data_url_to_local
+                from urllib.parse import urlparse, unquote
+                import os
+                for it in top_level_atts:
+                    url_value = None
+                    if isinstance(it, str):
+                        url_value = it
+                    elif isinstance(it, dict):
+                        url_value = it.get('url') or it.get('path')
+                    url_value = (url_value or '').strip()
+                    if not url_value:
+                        continue
+                    if url_value.startswith('data:'):
+                        fp = extract_data_url_to_local(url_value)
+                        if fp:
+                            image_list.append(fp)
+                    elif url_value.startswith('file:'):
+                        parsed = urlparse(url_value)
+                        lp = unquote(parsed.path)
+                        if os.path.exists(lp):
+                            image_list.append(lp)
+                    elif os.path.isabs(url_value) and os.path.exists(url_value):
+                        image_list.append(url_value)
+            # 消息级 attachments/images/files/media
+            for msg in (request.messages or []):
+                for key in ('attachments', 'images', 'files', 'media'):
+                    arr = getattr(msg, key, None)
+                    if not isinstance(arr, list):
+                        continue
+                    for it in arr:
+                        url_value = None
+                        if isinstance(it, str):
+                            url_value = it
+                        elif isinstance(it, dict):
+                            url_value = it.get('url') or it.get('path')
+                        url_value = (url_value or '').strip()
+                        if not url_value:
+                            continue
+                        if url_value.startswith('data:'):
+                            fp = extract_data_url_to_local(url_value)
+                            if fp:
+                                image_list.append(fp)
+                        elif url_value.startswith('file:'):
+                            parsed = urlparse(url_value)
+                            lp = unquote(parsed.path)
+                            if os.path.exists(lp):
+                                image_list.append(lp)
+                        elif os.path.isabs(url_value) and os.path.exists(url_value):
+                            image_list.append(url_value)
+        except Exception:
+            pass
 
         # 使用PageController处理页面交互
         # 注意：聊天历史清空已移至队列处理锁释放后执行

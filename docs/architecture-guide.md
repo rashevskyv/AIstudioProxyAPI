@@ -162,6 +162,23 @@ AIstudioProxyAPI/
 - **优势**: 完整参数支持，最终后备
 - **适用**: 调试模式，参数精确控制
 
+## 🧭 请求处理路径（辅助流/Playwright）
+
+- 辅助流路径（STREAM）：
+  - 入口：`_handle_auxiliary_stream_response`
+  - 生成器：`_gen_sse_from_aux_stream`（从 `STREAM_QUEUE` 消费，产出 OpenAI 兼容 SSE，携带 tool_calls 和 usage）
+  - 适合：高性能场景，SSE 首选
+
+- Playwright 路径（页面）：
+  - 入口：`_handle_playwright_response`
+  - 生成器：`_gen_sse_from_playwright`（通过 `PageController.get_response` 拉取最终文本，按行/字符分块输出，附带 usage）
+  - 适合：作为回退路径，确保功能完整
+
+两条路径均保持：
+- 客户端断开检测与提前结束
+- 最终使用统计 `usage` 的输出
+- OpenAI 兼容的 SSE/JSON 格式
+
 ## 🔐 认证系统架构
 
 ### API 密钥管理
