@@ -260,23 +260,23 @@ def prepare_combined_prompt(messages: List[Message], req_id: str) -> str:
                 system_prompt_content = content.strip()
                 processed_system_message_indices.add(i)
                 logger.info(f"[{req_id}] (准备提示) 在索引 {i} 找到并使用系统提示: '{system_prompt_content[:80]}...'")
-                system_instr_prefix = "系统指令:\n"
+                system_instr_prefix = "System Instruction:\n"
                 combined_parts.append(f"{system_instr_prefix}{system_prompt_content}")
             else:
-                logger.info(f"[{req_id}] (准备提示) 在索引 {i} 忽略非字符串或空的系统消息。")
+                logger.info(f"[{req_id}] (Prepare Prompt) Ignoring non-string or empty system message at index {i}.")
                 processed_system_message_indices.add(i)
             break
     
-    role_map_ui = {"user": "用户", "assistant": "助手", "system": "系统", "tool": "工具"}
+    role_map_ui = {"user": "User", "assistant": "Assistant", "system": "System", "tool": "Tool"}
     turn_separator = "\n---\n"
     
-    # 处理其他消息
+    # Process other messages
     for i, msg in enumerate(messages):
         if i in processed_system_message_indices:
             continue
         
         if msg.role == 'system':
-            logger.info(f"[{req_id}] (准备提示) 跳过在索引 {i} 的后续系统消息。")
+            logger.info(f"[{req_id}] (Prepare Prompt) Skipping subsequent system message at index {i}.")
             continue
         
         if combined_parts:
@@ -292,7 +292,7 @@ def prepare_combined_prompt(messages: List[Message], req_id: str) -> str:
         if isinstance(content, str):
             content_str = content.strip()
         elif isinstance(content, list):
-            # 处理多模态内容
+            # Handle multimodal content
             text_parts = []
             for item in content:
                 if hasattr(item, 'type') and item.type == 'text':
@@ -303,22 +303,22 @@ def prepare_combined_prompt(messages: List[Message], req_id: str) -> str:
                     image_url_value = item.image_url.url
                     if image_url_value.startswith("data:image/"):
                         try:
-                            # 提取 Base64 字符串
+                            # Extract Base64 string
                             image_full_path = extract_base64_to_local(image_url_value)
                             images_list.append(image_full_path)
                         except (ValueError, requests.exceptions.RequestException, Exception) as e:
-                            print(f"处理 Base64 图片并上传到 Imgur 失败: {e}")
+                            print(f"Failed to process Base64 image and upload to Imgur: {e}")
                 else:
-                    logger.warning(f"[{req_id}] (准备提示) 警告: 在索引 {i} 的消息中忽略非文本或未知类型的 content item")
+                    logger.warning(f"[{req_id}] (Prepare Prompt) Warning: Ignoring non-text or unknown content item type in message at index {i}")
             content_str = "\n".join(text_parts).strip()
         else:
-            logger.warning(f"[{req_id}] (准备提示) 警告: 角色 {role} 在索引 {i} 的内容类型意外 ({type(content)}) 或为 None。")
+            logger.warning(f"[{req_id}] (Prepare Prompt) Warning: Unexpected content type ({type(content)}) or None for role {role} at index {i}.")
             content_str = str(content or "").strip()
         
         if content_str:
             current_turn_parts.append(content_str)
         
-        # 处理工具调用
+        # Handle tool calls
         tool_calls = msg.tool_calls
         if role == 'assistant' and tool_calls:
             if content_str:
@@ -338,7 +338,7 @@ def prepare_combined_prompt(messages: List[Message], req_id: str) -> str:
                         formatted_args = func_args_str if func_args_str is not None else "{}"
                     
                     tool_call_visualizations.append(
-                        f"请求调用函数: {func_name}\n参数:\n{formatted_args}"
+                        f"Request to call function: {func_name}\nArguments:\n{formatted_args}"
                     )
             
             if tool_call_visualizations:
@@ -347,16 +347,16 @@ def prepare_combined_prompt(messages: List[Message], req_id: str) -> str:
         if len(current_turn_parts) > 1 or (role == 'assistant' and tool_calls):
             combined_parts.append("".join(current_turn_parts))
         elif not combined_parts and not current_turn_parts:
-            logger.info(f"[{req_id}] (准备提示) 跳过角色 {role} 在索引 {i} 的空消息 (且无工具调用)。")
+            logger.info(f"[{req_id}] (Prepare Prompt) Skipping empty message for role {role} at index {i} (and no tool calls).")
         elif len(current_turn_parts) == 1 and not combined_parts:
-            logger.info(f"[{req_id}] (准备提示) 跳过角色 {role} 在索引 {i} 的空消息 (只有前缀)。")
+            logger.info(f"[{req_id}] (Prepare Prompt) Skipping empty message for role {role} at index {i} (only prefix).")
     
     final_prompt = "".join(combined_parts)
     if final_prompt:
         final_prompt += "\n"
     
     preview_text = final_prompt[:300].replace('\n', '\\n')
-    logger.info(f"[{req_id}] (准备提示) 组合提示长度: {len(final_prompt)}。预览: '{preview_text}...'")
+    logger.info(f"[{req_id}] (Prepare Prompt) Combined prompt length: {len(final_prompt)}. Preview: '{preview_text}...'")
     
     return final_prompt,images_list
 

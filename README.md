@@ -61,7 +61,32 @@ Follow these steps to bring the proxy online and route Google Gemini traffic thr
 # Clone the project
 git clone https://github.com/CJackHwang/AIstudioProxyAPI.git
 cd AIstudioProxyAPI
+```
 
+Install the Rust Toolchain
+
+You need to install the Rust compiler so that Poetry can build `pydantic-core`. This is a one-time setup on your machine.
+
+**Step 1: Download and Run the Rust Installer**
+
+1.  Go to the official Rust installation website: **https://www.rust-lang.org/tools/install**
+2.  Download the `rustup-init.exe` for 64-bit Windows.
+3.  Run the installer. It will open a command prompt window.
+
+**Step 2: Proceed with the Installation**
+
+The installer will present you with three options. For most users, the default is perfect.
+
+```bash
+1) Proceed with installation (default)
+2) Customize installation
+3) Cancel installation
+>
+```
+
+Simply press **`1`** and then **Enter** to start the default installation. It will download and set up the Rust compiler (`rustc`), the package manager (`cargo`), and other necessary tools.
+
+```bash
 # Install Poetry if you do not have it yet
 curl -sSL https://install.python-poetry.org | python3 -
 

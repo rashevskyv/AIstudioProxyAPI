@@ -25,6 +25,7 @@ from models import ChatCompletionRequest, WebSocketConnectionManager
 
 # --- browser_utils模块导入 ---
 from browser_utils import _handle_model_list_response
+from browser_utils.operations import create_new_chat
 
 # --- 依赖项导入 ---
 from .dependencies import *
@@ -212,6 +213,27 @@ async def chat_completions(
     except Exception as e:
         logger.exception(f"[{req_id}] 等待Worker响应时出错")
         raise HTTPException(status_code=500, detail=f"[{req_id}] 服务器内部错误: {e}")
+
+
+# --- 新建聊天端点 ---
+async def new_chat_endpoint(
+    page_instance: AsyncPage = Depends(get_page_instance),
+    logger: logging.Logger = Depends(get_logger)
+):
+    """Endpoint to create a new chat session."""
+    req_id = ''.join(random.choices('abcdefghijklmnopqrstuvwxyz01234g', k=7))
+    logger.info(f"[{req_id}] Received request to create a new chat.")
+    
+    if not page_instance or page_instance.is_closed():
+        logger.error(f"[{req_id}] Cannot create new chat, page is not available.")
+        raise HTTPException(status_code=503, detail="Browser page is not available.")
+
+    success = await create_new_chat(page_instance, req_id)
+
+    if success:
+        return JSONResponse(content={"success": True, "message": "New chat created successfully."})
+    else:
+        raise HTTPException(status_code=500, detail="Failed to create a new chat.")
 
 
 # --- 取消请求相关 ---
