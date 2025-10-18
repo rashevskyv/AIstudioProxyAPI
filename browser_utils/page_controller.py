@@ -604,7 +604,25 @@ class PageController:
             await confirm_button_locator.click(timeout=CLICK_TIMEOUT_MS)
         else:
             self.logger.info(f"[{self.req_id}] 点击\"清空聊天\"按钮: {CLEAR_CHAT_BUTTON_SELECTOR}")
-            await clear_chat_button_locator.click(timeout=CLICK_TIMEOUT_MS)
+            # 若存在透明遮罩层拦截指针事件，先尝试清理
+            try:
+                await self._dismiss_backdrops()
+            except Exception:
+                pass
+            try:
+                await clear_chat_button_locator.click(timeout=CLICK_TIMEOUT_MS)
+            except Exception as first_click_err:
+                # 尝试再次清理遮罩，并使用 force 点击作为兜底
+                self.logger.warning(f"[{self.req_id}] 清空按钮第一次点击失败，尝试清理遮罩并强制点击: {first_click_err}")
+                try:
+                    await self._dismiss_backdrops()
+                except Exception:
+                    pass
+                try:
+                    await clear_chat_button_locator.click(timeout=CLICK_TIMEOUT_MS, force=True)
+                except Exception as force_click_err:
+                    self.logger.error(f"[{self.req_id}] 清空按钮强制点击仍失败: {force_click_err}")
+                    raise
             await self._check_disconnect(check_client_disconnected, "清空聊天 - 点击\"清空聊天\"后")
 
             try:
@@ -655,6 +673,28 @@ class PageController:
                     raise
 
             await self._check_disconnect(check_client_disconnected, f"清空聊天 - 消失检查尝试 {attempt_disappear + 1} 后")
+
+    async def _dismiss_backdrops(self):
+        """尝试关闭可能残留的 cdk 透明遮罩层以避免点击被拦截。"""
+        try:
+            backdrop = self.page.locator('div.cdk-overlay-backdrop.cdk-overlay-backdrop-showing, div.cdk-overlay-backdrop.cdk-overlay-transparent-backdrop.cdk-overlay-backdrop-showing')
+            for i in range(3):
+                cnt = 0
+                try:
+                    cnt = await backdrop.count()
+                except Exception:
+                    cnt = 0
+                if cnt and cnt > 0:
+                    self.logger.info(f"[{self.req_id}] 检测到透明遮罩层 ({cnt})，发送 ESC 以关闭 (尝试 {i+1}/3)。")
+                    try:
+                        await self.page.keyboard.press('Escape')
+                        await asyncio.sleep(0.2)
+                    except Exception:
+                        pass
+                else:
+                    break
+        except Exception:
+            pass
 
     async def _verify_chat_cleared(self, check_client_disconnected: Callable):
         """验证聊天已清空"""
