@@ -20,7 +20,8 @@
 AIstudioProxyAPI/
 ├── api_utils/              # FastAPI 应用核心模块
 │   ├── app.py             # FastAPI 应用入口和生命周期管理
-│   ├── routes.py          # API 路由定义和端点实现
+│   ├── routers/           # API 路由定义（按职责拆分）
+│   ├── routes.py          # 兼容层：重导出 routers/* 端点
 │   ├── request_processor.py # 请求处理核心逻辑
 │   ├── queue_worker.py    # 异步队列工作器
 │   ├── auth_utils.py      # API 密钥认证管理
@@ -63,13 +64,18 @@ AIstudioProxyAPI/
 - 中间件配置 (API 密钥认证)
 - 全局状态初始化
 
-#### routes.py - API 路由
+#### routers/* - API 路由（按职责拆分）
 
-- `/v1/chat/completions` - 聊天完成端点
-- `/v1/models` - 模型列表端点
-- `/api/keys/*` - API 密钥管理端点
-- `/health` - 健康检查端点
-- WebSocket 日志端点
+- static.py: `/`, `/webui.css`, `/webui.js`
+- info.py: `/api/info`
+- health.py: `/health`
+- models.py: `/v1/models`
+- chat.py: `/v1/chat/completions`
+- queue.py: `/v1/queue`, `/v1/cancel/{req_id}`
+- logs_ws.py: `/ws/logs`
+- api_keys.py: `/api/keys*`
+
+应用层从 `api_utils.routers` 导入进行注册，已移除旧的集中式 `routes.py` 文件。
 
 #### request_processor.py - 请求处理核心
 

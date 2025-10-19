@@ -6,311 +6,53 @@ API工具函数模块
 import asyncio
 import json
 import time
-import datetime
 from typing import Any, Dict, List, Optional, AsyncGenerator, Tuple, Union
-from asyncio import Queue
 from models import Message
 import re
 import base64
-import requests
+import requests  # retained for potential outbound helpers; remove if unused later
 import os
 import hashlib
 from urllib.parse import urlparse, unquote
-from .tools_registry import execute_tool_call
+from .tools_registry import execute_tool_call, register_runtime_tools
+from .sse import (
+    generate_sse_chunk,
+    generate_sse_stop_chunk,
+    generate_sse_error_chunk,
+)
+from .utils_ext import (
+    use_stream_response,
+    clear_stream_queue,
+    use_helper_get_response,
+    validate_chat_request,
+    _extension_for_mime,
+    extract_data_url_to_local,
+    save_blob_to_local,
+    estimate_tokens,
+    calculate_usage_stats,
+)
 
 
 # --- SSE生成函数 ---
-def generate_sse_chunk(delta: str, req_id: str, model: str) -> str:
-    """生成SSE数据块"""
-    chunk_data = {
-        "id": f"chatcmpl-{req_id}",
-        "object": "chat.completion.chunk",
-        "created": int(time.time()),
-        "model": model,
-        "choices": [{"index": 0, "delta": {"content": delta}, "finish_reason": None}]
-    }
-    return f"data: {json.dumps(chunk_data)}\n\n"
+## SSE helpers moved to api_utils.sse and re-exported here
 
 
-def generate_sse_stop_chunk(req_id: str, model: str, reason: str = "stop", usage: dict = None) -> str:
-    """生成SSE停止块"""
-    stop_chunk_data = {
-        "id": f"chatcmpl-{req_id}",
-        "object": "chat.completion.chunk",
-        "created": int(time.time()),
-        "model": model,
-        "choices": [{"index": 0, "delta": {}, "finish_reason": reason}]
-    }
-    
-    # 添加usage信息（如果提供）
-    if usage:
-        stop_chunk_data["usage"] = usage
-    
-    return f"data: {json.dumps(stop_chunk_data)}\n\ndata: [DONE]\n\n"
-
-
-def generate_sse_error_chunk(message: str, req_id: str, error_type: str = "server_error") -> str:
-    """生成SSE错误块"""
-    error_chunk = {"error": {"message": message, "type": error_type, "param": None, "code": req_id}}
-    return f"data: {json.dumps(error_chunk)}\n\n"
-
-
-# --- 流处理工具函数 ---
-async def use_stream_response(req_id: str) -> AsyncGenerator[Any, None]:
-    """使用流响应（从服务器的全局队列获取数据）"""
-    from server import STREAM_QUEUE, logger
-    import queue
-    
-    if STREAM_QUEUE is None:
-        logger.warning(f"[{req_id}] STREAM_QUEUE is None, 无法使用流响应")
-        return
-    
-    logger.info(f"[{req_id}] 开始使用流响应")
-    
-    empty_count = 0
-    max_empty_retries = 300  # 30秒超时
-    data_received = False
-    
-    try:
-        while True:
-            try:
-                # 从队列中获取数据
-                data = STREAM_QUEUE.get_nowait()
-                if data is None:  # 结束标志
-                    logger.info(f"[{req_id}] 接收到流结束标志")
-                    break
-                
-                # 重置空计数器
-                empty_count = 0
-                data_received = True
-                logger.debug(f"[{req_id}] 接收到流数据: {type(data)} - {str(data)[:200]}...")
-                
-                # 检查是否是JSON字符串形式的结束标志
-                if isinstance(data, str):
-                    try:
-                        parsed_data = json.loads(data)
-                        if parsed_data.get("done") is True:
-                            logger.info(f"[{req_id}] 接收到JSON格式的完成标志")
-                            yield parsed_data
-                            break
-                        else:
-                            yield parsed_data
-                    except json.JSONDecodeError:
-                        # 如果不是JSON，直接返回字符串
-                        logger.debug(f"[{req_id}] 返回非JSON字符串数据")
-                        yield data
-                else:
-                    # 直接返回数据
-                    yield data
-                    
-                    # 检查字典类型的结束标志
-                    if isinstance(data, dict) and data.get("done") is True:
-                        logger.info(f"[{req_id}] 接收到字典格式的完成标志")
-                        break
-                
-            except (queue.Empty, asyncio.QueueEmpty):
-                empty_count += 1
-                if empty_count % 50 == 0:  # 每5秒记录一次等待状态
-                    logger.info(f"[{req_id}] 等待流数据... ({empty_count}/{max_empty_retries})")
-                
-                if empty_count >= max_empty_retries:
-                    if not data_received:
-                        logger.error(f"[{req_id}] 流响应队列空读取次数达到上限且未收到任何数据，可能是辅助流未启动或出错")
-                    else:
-                        logger.warning(f"[{req_id}] 流响应队列空读取次数达到上限 ({max_empty_retries})，结束读取")
-                    
-                    # 返回超时完成信号，而不是简单退出
-                    yield {"done": True, "reason": "internal_timeout", "body": "", "function": []}
-                    return
-                    
-                await asyncio.sleep(0.1)  # 100ms等待
-                continue
-                
-    except Exception as e:
-        logger.error(f"[{req_id}] 使用流响应时出错: {e}")
-        raise
-    finally:
-        logger.info(f"[{req_id}] 流响应使用完成，数据接收状态: {data_received}")
-
-
-async def clear_stream_queue():
-    """清空流队列（与原始参考文件保持一致）"""
-    from server import STREAM_QUEUE, logger
-    import queue
-
-    if STREAM_QUEUE is None:
-        logger.info("流队列未初始化或已被禁用，跳过清空操作。")
-        return
-
-    while True:
-        try:
-            data_chunk = await asyncio.to_thread(STREAM_QUEUE.get_nowait)
-            # logger.info(f"清空流式队列缓存，丢弃数据: {data_chunk}")
-        except queue.Empty:
-            logger.info("流式队列已清空 (捕获到 queue.Empty)。")
-            break
-        except Exception as e:
-            logger.error(f"清空流式队列时发生意外错误: {e}", exc_info=True)
-            break
-    logger.info("流式队列缓存清空完毕。")
+## stream helpers moved to utils_ext.stream
 
 
 # --- Helper response generator ---
-async def use_helper_get_response(helper_endpoint: str, helper_sapisid: str) -> AsyncGenerator[str, None]:
-    """使用Helper服务获取响应的生成器"""
-    from server import logger
-    import aiohttp
-
-    logger.info(f"正在尝试使用Helper端点: {helper_endpoint}")
-
-    try:
-        async with aiohttp.ClientSession() as session:
-            headers = {
-                'Content-Type': 'application/json',
-                'Cookie': f'SAPISID={helper_sapisid}' if helper_sapisid else ''
-            }
-            
-            async with session.get(helper_endpoint, headers=headers) as response:
-                if response.status == 200:
-                    async for chunk in response.content.iter_chunked(1024):
-                        if chunk:
-                            yield chunk.decode('utf-8', errors='ignore')
-                else:
-                    logger.error(f"Helper端点返回错误状态: {response.status}")
-                    
-    except Exception as e:
-        logger.error(f"使用Helper端点时出错: {e}")
+## helper generator moved to utils_ext.helper
 
 
 # --- 请求验证函数 ---
-def validate_chat_request(messages: List[Message], req_id: str) -> Dict[str, Optional[str]]:
-    """验证聊天请求"""
-    from server import logger
-    
-    if not messages:
-        raise ValueError(f"[{req_id}] 无效请求: 'messages' 数组缺失或为空。")
-    
-    if not any(msg.role != 'system' for msg in messages):
-        raise ValueError(f"[{req_id}] 无效请求: 所有消息都是系统消息。至少需要一条用户或助手消息。")
-    
-    # 返回验证结果
-    return {
-        "error": None,
-        "warning": None
-    }
+## validation moved to utils_ext.validation
 
 
-def _extension_for_mime(mime_type: str) -> str:
-    """根据 MIME 类型返回合适的文件扩展名。未知类型返回 .bin"""
-    mime_type = (mime_type or '').lower()
-    mapping = {
-        # images
-        'image/png': '.png',
-        'image/jpeg': '.jpg',
-        'image/jpg': '.jpg',
-        'image/gif': '.gif',
-        'image/webp': '.webp',
-        'image/svg+xml': '.svg',
-        'image/bmp': '.bmp',
-        # video
-        'video/mp4': '.mp4',
-        'video/webm': '.webm',
-        'video/ogg': '.ogv',
-        # audio
-        'audio/mpeg': '.mp3',
-        'audio/mp3': '.mp3',
-        'audio/wav': '.wav',
-        'audio/ogg': '.ogg',
-        'audio/webm': '.weba',
-        # documents
-        'application/pdf': '.pdf',
-        'application/zip': '.zip',
-        'application/x-zip-compressed': '.zip',
-        'application/json': '.json',
-        'text/plain': '.txt',
-        'text/markdown': '.md',
-        'text/html': '.html',
-    }
-    return mapping.get(mime_type, f".{mime_type.split('/')[-1]}" if '/' in mime_type else '.bin')
-
-
-def extract_data_url_to_local(data_url: str, req_id: Optional[str] = None) -> Optional[str]:
-    """
-    解析并保存任意 data:URL (data:<mime>;base64,<payload>) 到本地文件，返回文件路径。
-    支持图片、视频、音频、PDF 等常见类型。
-    """
-    from server import logger
-    # 允许保存到通用上传目录
-    from config import UPLOAD_FILES_DIR
-    output_dir = UPLOAD_FILES_DIR if req_id is None else os.path.join(UPLOAD_FILES_DIR, req_id)
-
-    match = re.match(r"^data:(?P<mime>[^;]+);base64,(?P<data>.*)$", data_url)
-    if not match:
-        logger.error("错误: data:URL 格式不正确或不包含 base64 数据。")
-        return None
-
-    mime_type = match.group('mime')
-    encoded_data = match.group('data')
-
-    try:
-        decoded_bytes = base64.b64decode(encoded_data)
-    except base64.binascii.Error as e:
-        logger.error(f"错误: Base64 解码失败 - {e}")
-        return None
-
-    md5_hash = hashlib.md5(decoded_bytes).hexdigest()
-    file_extension = _extension_for_mime(mime_type)
-    output_filepath = os.path.join(output_dir, f"{md5_hash}{file_extension}")
-
-    # 仅按请求粒度清理目录；此处不再删除，以免多附件互相覆盖
-    os.makedirs(output_dir, exist_ok=True)
-
-    if os.path.exists(output_filepath):
-        logger.info(f"文件已存在，跳过保存: {output_filepath}")
-        return output_filepath
-
-    try:
-        with open(output_filepath, 'wb') as f:
-            f.write(decoded_bytes)
-        logger.info(f"已保存 data:URL 到: {output_filepath}")
-        return output_filepath
-    except IOError as e:
-        logger.error(f"错误: 保存文件失败 - {e}")
-        return None
-
-
-def save_blob_to_local(raw_bytes: bytes, mime_type: Optional[str] = None, fmt_ext: Optional[str] = None, req_id: Optional[str] = None) -> Optional[str]:
-    """将原始数据保存到 upload_files/ 下，按内容 MD5 命名，扩展名来源于 mime 或显式格式。"""
-    from server import logger
-    from config import UPLOAD_FILES_DIR
-    output_dir = UPLOAD_FILES_DIR if req_id is None else os.path.join(UPLOAD_FILES_DIR, req_id)
-    md5_hash = hashlib.md5(raw_bytes).hexdigest()
-    ext = None
-    if fmt_ext:
-        fmt_ext = fmt_ext.strip('. ')
-        ext = f'.{fmt_ext}' if fmt_ext else None
-    if not ext and mime_type:
-        ext = _extension_for_mime(mime_type)
-    if not ext:
-        ext = '.bin'
-    # 仅按请求粒度清理目录；此处不再删除，以免多附件互相覆盖
-    os.makedirs(output_dir, exist_ok=True)
-    output_filepath = os.path.join(output_dir, f"{md5_hash}{ext}")
-    if os.path.exists(output_filepath):
-        logger.info(f"文件已存在，跳过保存: {output_filepath}")
-        return output_filepath
-    try:
-        with open(output_filepath, 'wb') as f:
-            f.write(raw_bytes)
-        logger.info(f"已保存二进制到: {output_filepath}")
-        return output_filepath
-    except IOError as e:
-        logger.error(f"错误: 保存二进制失败 - {e}")
-        return None
+## files helpers moved to utils_ext.files
 
 
 # --- 提示准备函数 ---
-def prepare_combined_prompt(messages: List[Message], req_id: str) -> Tuple[str, List[str]]:
+def prepare_combined_prompt(messages: List[Message], req_id: str, tools: Optional[List[Dict[str, Any]]] = None, tool_choice: Optional[Union[str, Dict[str, Any]]] = None) -> Tuple[str, List[str]]:
     """准备组合提示"""
     from server import logger
     
@@ -321,6 +63,42 @@ def prepare_combined_prompt(messages: List[Message], req_id: str) -> Tuple[str, 
     system_prompt_content: Optional[str] = None
     processed_system_message_indices = set()
     files_list: List[str] = []  # 收集需要上传的本地文件路径（图片、视频、PDF等）
+
+    # 若声明了可用工具，先在提示前注入工具目录，帮助模型知晓可用函数（内部适配，不影响外部协议）
+    if isinstance(tools, list) and len(tools) > 0:
+        try:
+            tool_lines: List[str] = ["可用工具目录:"]
+            for t in tools:
+                name = None
+                params_schema = None
+                if isinstance(t, dict):
+                    fn = t.get('function') if 'function' in t else t
+                    if isinstance(fn, dict):
+                        name = fn.get('name') or t.get('name')
+                        params_schema = fn.get('parameters')
+                    else:
+                        name = t.get('name')
+                if name:
+                    tool_lines.append(f"- 函数: {name}")
+                    if params_schema:
+                        try:
+                            tool_lines.append(f"  参数模式: {json.dumps(params_schema, ensure_ascii=False)}")
+                        except Exception:
+                            pass
+            if tool_choice:
+                # 明确要求或提示可调用的函数名
+                chosen_name = None
+                if isinstance(tool_choice, dict):
+                    fn = tool_choice.get('function') if tool_choice else None
+                    if isinstance(fn, dict):
+                        chosen_name = fn.get('name')
+                elif isinstance(tool_choice, str) and tool_choice.lower() not in ('auto', 'none', 'no', 'off', 'required', 'any'):
+                    chosen_name = tool_choice
+                if chosen_name:
+                    tool_lines.append(f"建议优先使用函数: {chosen_name}")
+            combined_parts.append("\n".join(tool_lines) + "\n---\n")
+        except Exception:
+            pass
 
     # 处理系统消息
     for i, msg in enumerate(messages):
@@ -583,7 +361,7 @@ def prepare_combined_prompt(messages: List[Message], req_id: str) -> Tuple[str, 
         if content_str:
             current_turn_parts.append(content_str)
         
-        # 处理工具调用
+        # 处理工具调用（不在此处主动执行，只做可视化，避免与对话式循环的客户端执行冲突）
         tool_calls = msg.tool_calls
         if role == 'assistant' and tool_calls:
             if content_str:
@@ -605,17 +383,35 @@ def prepare_combined_prompt(messages: List[Message], req_id: str) -> Tuple[str, 
                     tool_call_visualizations.append(
                         f"请求调用函数: {func_name}\n参数:\n{formatted_args}"
                     )
-                    # 执行并附加结果到提示
-                    try:
-                        exec_result = execute_tool_call(func_name or '', func_args_str or '{}')
-                        tool_call_visualizations.append(
-                            f"函数执行结果:\n{exec_result}"
-                        )
-                    except Exception:
-                        pass
             
             if tool_call_visualizations:
                 current_turn_parts.append("\n".join(tool_call_visualizations))
+
+        # 处理工具结果消息（role = 'tool'）：将其纳入提示，便于模型看到工具返回
+        if role == 'tool':
+            tool_result_lines: List[str] = []
+            # 标准 OpenAI 样式：content 为字符串，tool_call_id 关联上一轮调用
+            tool_call_id = getattr(msg, 'tool_call_id', None)
+            if tool_call_id:
+                tool_result_lines.append(f"工具结果 (tool_call_id={tool_call_id}):")
+            if isinstance(msg.content, str):
+                tool_result_lines.append(msg.content)
+            elif isinstance(msg.content, list):
+                # 兼容少数客户端把结果装在列表里
+                try:
+                    merged = "\n".join(
+                        it.get('text') if isinstance(it, dict) and it.get('type') == 'text' else str(it)
+                        for it in msg.content
+                    )
+                    tool_result_lines.append(merged)
+                except Exception:
+                    tool_result_lines.append(str(msg.content))
+            else:
+                tool_result_lines.append(str(msg.content))
+            if tool_result_lines:
+                if content_str:
+                    current_turn_parts.append("\n")
+                current_turn_parts.append("\n".join(tool_result_lines))
         
         if len(current_turn_parts) > 1 or (role == 'assistant' and tool_calls):
             combined_parts.append("".join(current_turn_parts))
@@ -671,7 +467,7 @@ def _get_latest_user_text(messages: List[Message]) -> str:
     return ''
 
 
-def maybe_execute_tools(messages: List[Message], tools: Optional[List[Dict[str, Any]]], tool_choice: Optional[Union[str, Dict[str, Any]]]) -> Optional[List[Dict[str, Any]]]:
+async def maybe_execute_tools(messages: List[Message], tools: Optional[List[Dict[str, Any]]], tool_choice: Optional[Union[str, Dict[str, Any]]]) -> Optional[List[Dict[str, Any]]]:
     """
     基于 tools/tool_choice 的主动函数执行：
     - 若 tool_choice 指明函数名（字符串或 {type:'function', function:{name}}），则尝试执行该函数；
@@ -680,6 +476,15 @@ def maybe_execute_tools(messages: List[Message], tools: Optional[List[Dict[str, 
     - 返回 [{name, arguments, result}]；如无可执行则返回 None。
     """
     try:
+        # Track runtime-declared tools和可选 MCP 端点
+        mcp_ep = None
+        # support per-request MCP endpoint via request-level message or tool spec extension (if present later)
+        # current: read from env only in registry when not provided
+        register_runtime_tools(tools, mcp_ep)
+        # 若已有工具结果消息（role='tool'），遵循对话式调用循环，由客户端驱动，服务器不主动再次执行
+        for m in messages:
+            if getattr(m, 'role', None) == 'tool':
+                return None
         chosen_name: Optional[str] = None
         if isinstance(tool_choice, dict):
             fn = tool_choice.get('function') if tool_choice else None
@@ -703,72 +508,14 @@ def maybe_execute_tools(messages: List[Message], tools: Optional[List[Dict[str, 
 
         user_text = _get_latest_user_text(messages)
         args_json = _extract_json_from_text(user_text) or '{}'
-        result_str = execute_tool_call(chosen_name, args_json)
+        import asyncio
+        result_str = await execute_tool_call(chosen_name, args_json)
         return [{"name": chosen_name, "arguments": args_json, "result": result_str}]
     except Exception:
         return None
 
 
-def estimate_tokens(text: str) -> int:
-    """
-    估算文本的token数量
-    使用简单的字符计数方法：
-    - 英文：大约4个字符 = 1个token
-    - 中文：大约1.5个字符 = 1个token  
-    - 混合文本：采用加权平均
-    """
-    if not text:
-        return 0
-    
-    # 统计中文字符数量（包括中文标点）
-    chinese_chars = sum(1 for char in text if '\u4e00' <= char <= '\u9fff' or '\u3000' <= char <= '\u303f' or '\uff00' <= char <= '\uffef')
-    
-    # 统计非中文字符数量
-    non_chinese_chars = len(text) - chinese_chars
-    
-    # 计算token估算
-    chinese_tokens = chinese_chars / 1.5  # 中文大约1.5字符/token
-    english_tokens = non_chinese_chars / 4.0  # 英文大约4字符/token
-    
-    return max(1, int(chinese_tokens + english_tokens))
-
-
-def calculate_usage_stats(messages: List[dict], response_content: str, reasoning_content: str = None) -> dict:
-    """
-    计算token使用统计
-    
-    Args:
-        messages: 请求中的消息列表
-        response_content: 响应内容
-        reasoning_content: 推理内容（可选）
-    
-    Returns:
-        包含token使用统计的字典
-    """
-    # 计算输入token（prompt tokens）
-    prompt_text = ""
-    for message in messages:
-        role = message.get("role", "")
-        content = message.get("content", "")
-        prompt_text += f"{role}: {content}\n"
-    
-    prompt_tokens = estimate_tokens(prompt_text)
-    
-    # 计算输出token（completion tokens）
-    completion_text = response_content or ""
-    if reasoning_content:
-        completion_text += reasoning_content
-    
-    completion_tokens = estimate_tokens(completion_text)
-    
-    # 总token数
-    total_tokens = prompt_tokens + completion_tokens
-    
-    return {
-        "prompt_tokens": prompt_tokens,
-        "completion_tokens": completion_tokens,
-        "total_tokens": total_tokens
-    } 
+## tokens moved to utils_ext.tokens
 
 
 def generate_sse_stop_chunk_with_usage(req_id: str, model: str, usage_stats: dict, reason: str = "stop") -> str:

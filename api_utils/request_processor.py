@@ -55,6 +55,14 @@ from .context_init import initialize_request_context as _init_request_context
 
 _initialize_request_context = _init_request_context
 
+# Error helpers
+from .error_utils import (
+    bad_request,
+    client_disconnected,
+    upstream_error,
+    server_error,
+)
+
 
 async def _analyze_model_requirements(req_id: str, context: RequestContext, request: ChatCompletionRequest) -> RequestContext:
     """代理到 model_switching.analyze_model_requirements"""
@@ -110,11 +118,18 @@ async def _prepare_and_validate_request(
     try:
         validate_chat_request(request.messages, req_id)
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=f"[{req_id}] 无效请求: {e}")
+        raise bad_request(req_id, f"无效请求: {e}")
     
-    prepared_prompt, images_list = prepare_combined_prompt(request.messages, req_id)
-    # 基于 tools/tool_choice 的主动函数执行
-    tool_exec_results = maybe_execute_tools(request.messages, request.tools, getattr(request, 'tool_choice', None))
+    prepared_prompt, images_list = prepare_combined_prompt(request.messages, req_id, getattr(request, 'tools', None), getattr(request, 'tool_choice', None))
+    # 基于 tools/tool_choice 的主动函数执行（支持 per-request MCP 端点）
+    try:
+        # 将 mcp_endpoint 注入 utils.maybe_execute_tools 的注册逻辑
+        if hasattr(request, 'mcp_endpoint') and request.mcp_endpoint:
+            from .tools_registry import register_runtime_tools
+            register_runtime_tools(getattr(request, 'tools', None), request.mcp_endpoint)
+        tool_exec_results = await maybe_execute_tools(request.messages, request.tools, getattr(request, 'tool_choice', None))
+    except Exception:
+        tool_exec_results = None
     check_client_disconnected("After Prompt Prep")
     # 将结果内联到提示末尾，供网页端一并提交
     if tool_exec_results:
@@ -188,7 +203,8 @@ async def _handle_response_processing(
     current_ai_studio_model_id = context.get('current_ai_studio_model_id')
     
     # 检查是否使用辅助流
-    stream_port = os.environ.get('STREAM_PORT')
+    from config import get_environment_variable
+    stream_port = get_environment_variable('STREAM_PORT')
     use_stream = stream_port != '0'
     
     if use_stream:
@@ -563,7 +579,7 @@ async def _process_request_refactored(
     except ClientDisconnectedError as disco_err:
         context['logger'].info(f"[{req_id}] 捕获到客户端断开连接信号: {disco_err}")
         if not result_future.done():
-             result_future.set_exception(HTTPException(status_code=499, detail=f"[{req_id}] Client disconnected during processing."))
+             result_future.set_exception(client_disconnected(req_id, "Client disconnected during processing."))
     except HTTPException as http_err:
         context['logger'].warning(f"[{req_id}] 捕获到 HTTP 异常: {http_err.status_code} - {http_err.detail}")
         if not result_future.done():
@@ -572,11 +588,11 @@ async def _process_request_refactored(
         context['logger'].error(f"[{req_id}] 捕获到 Playwright 错误: {pw_err}")
         await save_error_snapshot(f"process_playwright_error_{req_id}")
         if not result_future.done():
-            result_future.set_exception(HTTPException(status_code=502, detail=f"[{req_id}] Playwright interaction failed: {pw_err}"))
+            result_future.set_exception(upstream_error(req_id, f"Playwright interaction failed: {pw_err}"))
     except Exception as e:
         context['logger'].exception(f"[{req_id}] 捕获到意外错误")
         await save_error_snapshot(f"process_unexpected_error_{req_id}")
         if not result_future.done():
-            result_future.set_exception(HTTPException(status_code=500, detail=f"[{req_id}] Unexpected server error: {e}"))
+            result_future.set_exception(server_error(req_id, f"Unexpected server error: {e}"))
     finally:
         await _cleanup_request_resources(req_id, disconnect_check_task, completion_event, result_future, request.stream)

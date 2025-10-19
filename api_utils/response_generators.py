@@ -9,12 +9,7 @@ from playwright.async_api import Page as AsyncPage
 
 from models import ClientDisconnectedError, ChatCompletionRequest
 from config import CHAT_COMPLETION_ID_PREFIX
-from .utils import (
-    use_stream_response,
-    calculate_usage_stats,
-    generate_sse_chunk,
-    generate_sse_stop_chunk,
-)
+from .utils import use_stream_response, calculate_usage_stats, generate_sse_chunk, generate_sse_stop_chunk
 from .common_utils import random_id
 
 
@@ -243,7 +238,7 @@ async def gen_sse_from_playwright(
     completion_event: Event,
 ) -> AsyncGenerator[str, None]:
     """Playwright 最终响应 -> OpenAI 兼容 SSE 生成器。"""
-    from .utils import generate_sse_chunk, generate_sse_stop_chunk, calculate_usage_stats
+    # Reuse already-imported helpers from utils to avoid repeated imports
     from models import ClientDisconnectedError
     from browser_utils.page_controller import PageController
 

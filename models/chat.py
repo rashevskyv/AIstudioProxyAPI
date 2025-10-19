@@ -76,3 +76,5 @@ class ChatCompletionRequest(BaseModel):
     response_format: Optional[Union[str, Dict[str, Any]]] = None
     # 兼容第三方客户端的顶层附件字段（非标准 OpenAI，但常见）
     attachments: Optional[List[Any]] = None
+    # MCP per-request endpoint（可选），用于工具调用回退到 MCP 服务
+    mcp_endpoint: Optional[str] = None

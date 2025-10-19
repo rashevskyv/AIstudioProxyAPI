@@ -71,7 +71,7 @@ graph TD
 
     subgraph "核心应用 (Core Application)"
         FastAPI_App["api_utils/app.py (FastAPI 应用)"]
-        Routes["api_utils/routes.py (路由处理)"]
+        Routes["api_utils/routers/* (路由处理)"]
         RequestProcessor["api_utils/request_processor.py (请求处理)"]
         AuthUtils["api_utils/auth_utils.py (认证管理)"]
         PageController["browser_utils/page_controller.py (页面控制)"]

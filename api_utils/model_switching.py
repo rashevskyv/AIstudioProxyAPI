@@ -17,10 +17,8 @@ async def analyze_model_requirements(req_id: str, context: RequestContext, reque
         if parsed_model_list:
             valid_model_ids = [m.get("id") for m in parsed_model_list]
             if requested_model_id not in valid_model_ids:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"[{req_id}] Invalid model '{requested_model_id}'. Available models: {', '.join(valid_model_ids)}",
-                )
+                from .error_utils import bad_request
+                raise bad_request(req_id, f"Invalid model '{requested_model_id}'. Available models: {', '.join(valid_model_ids)}")
 
         context['model_id_to_use'] = requested_model_id
         if current_ai_studio_model_id != requested_model_id:
@@ -60,7 +58,8 @@ async def _handle_model_switch_failure(req_id: str, page: AsyncPage, model_id_to
     import server
     logger.warning(f"[{req_id}] ❌ 模型切换至 {model_id_to_use} 失败。")
     server.current_ai_studio_model_id = model_before_switch
-    raise HTTPException(status_code=422, detail=f"[{req_id}] 未能切换到模型 '{model_id_to_use}'。请确保模型可用。")
+    from .error_utils import http_error
+    raise http_error(422, f"[{req_id}] 未能切换到模型 '{model_id_to_use}'。请确保模型可用。")
 
 
 async def handle_parameter_cache(req_id: str, context: RequestContext) -> None:
@@ -76,4 +75,3 @@ async def handle_parameter_cache(req_id: str, context: RequestContext) -> None:
             logger.info(f"[{req_id}] 模型已更改，参数缓存失效。")
             page_params_cache.clear()
             page_params_cache["last_known_model_id_for_params"] = current_ai_studio_model_id
-

@@ -18,7 +18,8 @@ async def locate_response_elements(page: AsyncPage, req_id: str, logger, check_c
         await expect_async(response_element).to_be_attached(timeout=90000)
         logger.info(f"[{req_id}] 响应元素已定位。")
     except (PlaywrightAsyncError, asyncio.TimeoutError) as locate_err:
-        raise HTTPException(status_code=502, detail=f"[{req_id}] 定位AI Studio响应元素失败: {locate_err}")
+        from .error_utils import upstream_error
+        raise upstream_error(req_id, f"定位AI Studio响应元素失败: {locate_err}")
     except Exception as locate_exc:
-        raise HTTPException(status_code=500, detail=f"[{req_id}] 定位响应元素时意外错误: {locate_exc}")
-
+        from .error_utils import server_error
+        raise server_error(req_id, f"定位响应元素时意外错误: {locate_exc}")
