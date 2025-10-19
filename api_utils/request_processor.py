@@ -20,6 +20,7 @@ from config import (
     MODEL_NAME,
     SUBMIT_BUTTON_SELECTOR,
 )
+from config import ONLY_COLLECT_CURRENT_USER_ATTACHMENTS, UPLOAD_FILES_DIR
 
 # --- models模块导入 ---
 from models import ChatCompletionRequest, ClientDisconnectedError
@@ -125,6 +126,50 @@ async def _prepare_and_validate_request(
                 prepared_prompt += f"\n---\n工具执行: {name}\n参数:\n{args}\n结果:\n{result_str}\n"
         except Exception:
             pass
+    # 若配置仅收集当前用户消息附件，则在此过滤附件
+    try:
+        if ONLY_COLLECT_CURRENT_USER_ATTACHMENTS:
+            latest_user = None
+            for msg in reversed(request.messages or []):
+                if getattr(msg, 'role', None) == 'user':
+                    latest_user = msg
+                    break
+            if latest_user is not None:
+                filtered: List[str] = []
+                from api_utils.utils import extract_data_url_to_local
+                from urllib.parse import urlparse, unquote
+                import os
+                # 收集该条 user 消息上的 data:/file:/绝对路径（存在的）
+                content = getattr(latest_user, 'content', None)
+                # 统一从 messages 附件字段抽取
+                for key in ('attachments', 'images', 'files', 'media'):
+                    arr = getattr(latest_user, key, None)
+                    if not isinstance(arr, list):
+                        continue
+                    for it in arr:
+                        url_value = None
+                        if isinstance(it, str):
+                            url_value = it
+                        elif isinstance(it, dict):
+                            url_value = it.get('url') or it.get('path')
+                        url_value = (url_value or '').strip()
+                        if not url_value:
+                            continue
+                        if url_value.startswith('data:'):
+                            fp = extract_data_url_to_local(url_value)
+                            if fp:
+                                filtered.append(fp)
+                        elif url_value.startswith('file:'):
+                            parsed = urlparse(url_value)
+                            lp = unquote(parsed.path)
+                            if os.path.exists(lp):
+                                filtered.append(lp)
+                        elif os.path.isabs(url_value) and os.path.exists(url_value):
+                            filtered.append(url_value)
+                images_list = filtered
+    except Exception:
+        pass
+
     return prepared_prompt, images_list
 
 async def _handle_response_processing(
@@ -352,6 +397,8 @@ async def _cleanup_request_resources(req_id: str, disconnect_check_task: Optiona
                                    is_streaming: bool) -> None:
     """清理请求资源"""
     from server import logger
+    from config import UPLOAD_FILES_DIR
+    import os, shutil
     
     if disconnect_check_task and not disconnect_check_task.done():
         disconnect_check_task.cancel()
@@ -363,6 +410,15 @@ async def _cleanup_request_resources(req_id: str, disconnect_check_task: Optiona
             logger.error(f"[{req_id}] 清理任务时出错: {task_clean_err}")
     
     logger.info(f"[{req_id}] 处理完成。")
+
+    # 清理本次请求的上传子目录，避免磁盘累积
+    try:
+        req_dir = os.path.join(UPLOAD_FILES_DIR, req_id)
+        if os.path.isdir(req_dir):
+            shutil.rmtree(req_dir, ignore_errors=True)
+            logger.info(f"[{req_id}] 已清理请求上传目录: {req_dir}")
+    except Exception as clean_err:
+        logger.warning(f"[{req_id}] 清理上传目录失败: {clean_err}")
     
     if is_streaming and completion_event and not completion_event.is_set() and (result_future.done() and result_future.exception() is not None):
          logger.warning(f"[{req_id}] 流式请求异常，确保完成事件已设置。")
@@ -406,13 +462,28 @@ async def _process_request_refactored(
         await _handle_parameter_cache(req_id, context)
         
         prepared_prompt,image_list = await _prepare_and_validate_request(req_id, request, check_client_disconnected)
-        # 兼容: 顶层与消息级附件字段合并到上传列表（仅 data:/file:/绝对路径）
+        # 额外合并顶层与消息级 attachments/files（兼容历史记录）已在下方处理；此处确保路径存在
         try:
+            import os
+            valid_images = []
+            for p in image_list:
+                if isinstance(p, str) and p and os.path.isabs(p) and os.path.exists(p):
+                    valid_images.append(p)
+            if len(valid_images) != len(image_list):
+                from server import logger
+                logger.warning(f"[{req_id}] 过滤掉不存在的附件路径: {set(image_list) - set(valid_images)}")
+            image_list = valid_images
+        except Exception:
+            pass
+        # 兼容: 顶层与消息级附件字段合并到上传列表（仅 data:/file:/绝对路径）
+        # 附件来源策略：仅接受当前请求显式提供的 data:/file:/绝对路径（存在的）
+        try:
+            from api_utils.utils import extract_data_url_to_local
+            from urllib.parse import urlparse, unquote
+            import os
+            # 顶层 attachments
             top_level_atts = getattr(request, 'attachments', None)
             if isinstance(top_level_atts, list) and len(top_level_atts) > 0:
-                from api_utils.utils import extract_data_url_to_local
-                from urllib.parse import urlparse, unquote
-                import os
                 for it in top_level_atts:
                     url_value = None
                     if isinstance(it, str):
@@ -423,7 +494,7 @@ async def _process_request_refactored(
                     if not url_value:
                         continue
                     if url_value.startswith('data:'):
-                        fp = extract_data_url_to_local(url_value)
+                        fp = extract_data_url_to_local(url_value, req_id=req_id)
                         if fp:
                             image_list.append(fp)
                     elif url_value.startswith('file:'):
@@ -433,7 +504,7 @@ async def _process_request_refactored(
                             image_list.append(lp)
                     elif os.path.isabs(url_value) and os.path.exists(url_value):
                         image_list.append(url_value)
-            # 消息级 attachments/images/files/media
+            # 消息级 attachments/images/files/media（全量收集，但仅保留有效本地/data）
             for msg in (request.messages or []):
                 for key in ('attachments', 'images', 'files', 'media'):
                     arr = getattr(msg, key, None)
@@ -449,7 +520,7 @@ async def _process_request_refactored(
                         if not url_value:
                             continue
                         if url_value.startswith('data:'):
-                            fp = extract_data_url_to_local(url_value)
+                            fp = extract_data_url_to_local(url_value, req_id=req_id)
                             if fp:
                                 image_list.append(fp)
                         elif url_value.startswith('file:'):

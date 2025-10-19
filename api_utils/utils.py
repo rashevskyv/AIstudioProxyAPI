@@ -234,14 +234,15 @@ def _extension_for_mime(mime_type: str) -> str:
     return mapping.get(mime_type, f".{mime_type.split('/')[-1]}" if '/' in mime_type else '.bin')
 
 
-def extract_data_url_to_local(data_url: str) -> Optional[str]:
+def extract_data_url_to_local(data_url: str, req_id: Optional[str] = None) -> Optional[str]:
     """
     解析并保存任意 data:URL (data:<mime>;base64,<payload>) 到本地文件，返回文件路径。
     支持图片、视频、音频、PDF 等常见类型。
     """
     from server import logger
     # 允许保存到通用上传目录
-    output_dir = os.path.join(os.path.dirname(__file__), '..', 'upload_files')
+    from config import UPLOAD_FILES_DIR
+    output_dir = UPLOAD_FILES_DIR if req_id is None else os.path.join(UPLOAD_FILES_DIR, req_id)
 
     match = re.match(r"^data:(?P<mime>[^;]+);base64,(?P<data>.*)$", data_url)
     if not match:
@@ -261,16 +262,7 @@ def extract_data_url_to_local(data_url: str) -> Optional[str]:
     file_extension = _extension_for_mime(mime_type)
     output_filepath = os.path.join(output_dir, f"{md5_hash}{file_extension}")
 
-    # 每次处理前清理旧文件，确保目录为空
-    try:
-        if os.path.isdir(output_dir):
-            for name in os.listdir(output_dir):
-                try:
-                    os.remove(os.path.join(output_dir, name))
-                except Exception:
-                    pass
-    except Exception:
-        pass
+    # 仅按请求粒度清理目录；此处不再删除，以免多附件互相覆盖
     os.makedirs(output_dir, exist_ok=True)
 
     if os.path.exists(output_filepath):
@@ -287,10 +279,11 @@ def extract_data_url_to_local(data_url: str) -> Optional[str]:
         return None
 
 
-def save_blob_to_local(raw_bytes: bytes, mime_type: Optional[str] = None, fmt_ext: Optional[str] = None) -> Optional[str]:
+def save_blob_to_local(raw_bytes: bytes, mime_type: Optional[str] = None, fmt_ext: Optional[str] = None, req_id: Optional[str] = None) -> Optional[str]:
     """将原始数据保存到 upload_files/ 下，按内容 MD5 命名，扩展名来源于 mime 或显式格式。"""
     from server import logger
-    output_dir = os.path.join(os.path.dirname(__file__), '..', 'upload_files')
+    from config import UPLOAD_FILES_DIR
+    output_dir = UPLOAD_FILES_DIR if req_id is None else os.path.join(UPLOAD_FILES_DIR, req_id)
     md5_hash = hashlib.md5(raw_bytes).hexdigest()
     ext = None
     if fmt_ext:
@@ -300,15 +293,7 @@ def save_blob_to_local(raw_bytes: bytes, mime_type: Optional[str] = None, fmt_ex
         ext = _extension_for_mime(mime_type)
     if not ext:
         ext = '.bin'
-    try:
-        if os.path.isdir(output_dir):
-            for name in os.listdir(output_dir):
-                try:
-                    os.remove(os.path.join(output_dir, name))
-                except Exception:
-                    pass
-    except Exception:
-        pass
+    # 仅按请求粒度清理目录；此处不再删除，以免多附件互相覆盖
     os.makedirs(output_dir, exist_ok=True)
     output_filepath = os.path.join(output_dir, f"{md5_hash}{ext}")
     if os.path.exists(output_filepath):
@@ -330,19 +315,7 @@ def prepare_combined_prompt(messages: List[Message], req_id: str) -> Tuple[str, 
     from server import logger
     
     logger.info(f"[{req_id}] (准备提示) 正在从 {len(messages)} 条消息准备组合提示 (包括历史)。")
-    # 清空上一请求的上传目录（按请求粒度），避免残留文件
-    try:
-        upload_dir = os.path.join(os.path.dirname(__file__), '..', 'upload_files')
-        if os.path.isdir(upload_dir):
-            for name in os.listdir(upload_dir):
-                fp = os.path.join(upload_dir, name)
-                try:
-                    if os.path.isfile(fp):
-                        os.remove(fp)
-                except Exception:
-                    pass
-    except Exception:
-        pass
+    # 不在此处清空 upload_files；由上层在每次请求开始时按需清理，避免历史附件丢失导致“文件不存在”错误。
     
     combined_parts = []
     system_prompt_content: Optional[str] = None
@@ -477,7 +450,7 @@ def prepare_combined_prompt(messages: List[Message], req_id: str) -> Tuple[str, 
 
                         # 归一化到本地文件列表，并记录日志
                         if url_value.startswith('data:'):
-                            file_path = extract_data_url_to_local(url_value)
+                            file_path = extract_data_url_to_local(url_value, req_id=req_id)
                             if file_path:
                                 files_list.append(file_path)
                                 logger.info(f"[{req_id}] (准备提示) 已识别并加入 data:URL 附件: {file_path}")
@@ -527,7 +500,7 @@ def prepare_combined_prompt(messages: List[Message], req_id: str) -> Tuple[str, 
 
                             if url_value:
                                 if url_value.startswith('data:'):
-                                    saved = extract_data_url_to_local(url_value)
+                                    saved = extract_data_url_to_local(url_value, req_id=req_id)
                                     if saved:
                                         files_list.append(saved)
                                         logger.info(f"[{req_id}] (准备提示) 已识别并加入音视频 data:URL 附件: {saved}")
@@ -542,7 +515,7 @@ def prepare_combined_prompt(messages: List[Message], req_id: str) -> Tuple[str, 
                                     logger.info(f"[{req_id}] (准备提示) 已识别并加入音视频本地附件(绝对路径): {url_value}")
                             elif data_val:
                                 if isinstance(data_val, str) and data_val.startswith('data:'):
-                                    saved = extract_data_url_to_local(data_val)
+                                    saved = extract_data_url_to_local(data_val, req_id=req_id)
                                     if saved:
                                         files_list.append(saved)
                                         logger.info(f"[{req_id}] (准备提示) 已识别并加入音视频 data:URL 附件: {saved}")
@@ -550,7 +523,7 @@ def prepare_combined_prompt(messages: List[Message], req_id: str) -> Tuple[str, 
                                     # 认为是纯 base64 数据
                                     try:
                                         raw = base64.b64decode(data_val)
-                                        saved = save_blob_to_local(raw, mime_val, fmt_val)
+                                        saved = save_blob_to_local(raw, mime_val, fmt_val, req_id=req_id)
                                         if saved:
                                             files_list.append(saved)
                                             logger.info(f"[{req_id}] (准备提示) 已识别并加入音视频 base64 附件: {saved}")
