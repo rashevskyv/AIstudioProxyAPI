@@ -4,13 +4,14 @@ import time
 import logging
 from asyncio import Queue, Future
 from fastapi import Depends, HTTPException, Request
-from ..dependencies import get_logger, get_request_queue, get_server_state, get_worker_task
+from ..dependencies import get_logger, get_request_queue, get_server_state, get_worker_task, get_page_instance
 from config import RESPONSE_COMPLETION_TIMEOUT
 from models import ChatCompletionRequest
 import asyncio
 from fastapi.responses import JSONResponse
 from config import get_environment_variable
 from ..error_utils import service_unavailable
+from browser_utils.operations import create_new_chat
 
 
 async def chat_completions(
@@ -57,3 +58,20 @@ async def chat_completions(
     except Exception as e:
         logger.exception(f"[{req_id}] 等待Worker响应时出错")
         raise HTTPException(status_code=500, detail=f"[{req_id}] 服务器内部错误: {e}")
+
+
+async def new_chat_endpoint(
+    page_instance = Depends(get_page_instance),
+    logger: logging.Logger = Depends(get_logger)
+) -> JSONResponse:
+    req_id = ''.join(random.choices('abcdefghijklmnopqrstuvwxyz0123456789', k=7))
+    logger.info(f"[{req_id}] 收到创建新会话请求 /api/new-chat")
+    if not page_instance or page_instance.is_closed():
+        logger.error(f"[{req_id}] 无法创建新会话，页面不可用。")
+        raise HTTPException(status_code=503, detail="Browser page is not available.")
+
+    success = await create_new_chat(page_instance, req_id)
+    if success:
+        return JSONResponse(content={"success": True, "message": "New chat created successfully."})
+    else:
+        raise HTTPException(status_code=500, detail="Failed to create a new chat.")

@@ -307,7 +307,7 @@ def create_app() -> FastAPI:
     # Import aggregated modular routers
     from .routers import (
         read_index, get_css, get_js, get_api_info,
-        health_check, list_models, chat_completions,
+        health_check, list_models, chat_completions, new_chat_endpoint,
         cancel_request, get_queue_status, websocket_log_endpoint,
         get_api_keys, add_api_key, test_api_key, delete_api_key
     )
@@ -320,6 +320,7 @@ def create_app() -> FastAPI:
     app.get("/health")(health_check)
     app.get("/v1/models")(list_models)
     app.post("/v1/chat/completions")(chat_completions)
+    app.post("/api/new-chat")(new_chat_endpoint)
     app.post("/v1/cancel/{req_id}")(cancel_request)
     app.get("/v1/queue")(get_queue_status)
     app.websocket("/ws/logs")(websocket_log_endpoint)

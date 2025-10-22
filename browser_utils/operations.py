@@ -19,6 +19,10 @@ from config import (
     CLICK_TIMEOUT_MS,
     RESPONSE_COMPLETION_TIMEOUT,
     INITIAL_WAIT_MS_BEFORE_POLLING,
+    CLEAR_CHAT_BUTTON_SELECTOR,
+    CLEAR_CHAT_CONFIRM_BUTTON_SELECTOR,
+    OVERLAY_SELECTOR,
+    WAIT_FOR_ELEMENT_TIMEOUT_MS,
 )
 from models import ClientDisconnectedError
 
@@ -65,7 +69,7 @@ def _parse_userscript_models(script_content: str):
     """从油猴脚本中解析模型列表 - 使用JSON解析方式"""
     try:
         # 查找脚本版本号
-        version_pattern = r'const\s+SCRIPT_VERSION\s*=\s*[\'"]([^\'"]+)[\'"]'
+        version_pattern = r'const\s+SCRIPT_VERSION\s*=\s*[\'\"]([^\'\"]+)[\'\"]'
         version_match = re.search(version_pattern, script_content)
         script_version = version_match.group(1) if version_match else "v1.6"
 
@@ -295,7 +299,7 @@ async def _handle_model_list_response(response: Any):
                                 try:
                                     raw_top_p = float(model_fields_list[9])
                                     if not (0.0 <= raw_top_p <= 1.0):
-                                        logger.warning(f"模型 {current_model_id_for_log}: 原始 top_p值 {raw_top_p} (来自列表索引9) 超出 [0,1] 范围，将裁剪。")
+                                        logger.warning(f"模型 {current_model_id_for_log}: 原始 top_p 值 {raw_top_p} (来自列表索引9) 超出 [0,1] 范围，将裁剪。")
                                         default_top_p_val = max(0.0, min(1.0, raw_top_p))
                                     else:
                                         default_top_p_val = raw_top_p
@@ -322,7 +326,7 @@ async def _handle_model_list_response(response: Any):
                                 try:
                                     raw_top_p = float(top_p_parsed)
                                     if not (0.0 <= raw_top_p <= 1.0):
-                                        logger.warning(f"模型 {current_model_id_for_log}: 原始 top_p值 {raw_top_p} (来自字典) 超出 [0,1] 范围，将裁剪。")
+                                        logger.warning(f"模型 {current_model_id_for_log}: 原始 top_p 值 {raw_top_p} (来自字典) 超出 [0,1] 范围，将裁剪。")
                                         default_top_p_val = max(0.0, min(1.0, raw_top_p))
                                     else:
                                         default_top_p_val = raw_top_p
@@ -395,7 +399,7 @@ async def _handle_model_list_response(response: Any):
                     if model_list_fetch_event and not model_list_fetch_event.is_set():
                         model_list_fetch_event.set()
                 elif not server.parsed_model_list:
-                    logger.warning("解析后模型列表仍然为空。")
+                    logger.warning("解析后模型列表仍为空。")
                     if model_list_fetch_event and not model_list_fetch_event.is_set(): 
                         model_list_fetch_event.set()
             else:
@@ -788,3 +792,73 @@ async def _get_final_response_content(
     logger.error(f"[{req_id}] (Helper GetContent) 所有获取响应内容的方法均失败。")
     await save_error_snapshot(f"get_content_all_methods_failed_{req_id}")
     return None 
+
+async def create_new_chat(page: AsyncPage, req_id: str) -> bool:
+    """
+    在 AI Studio 页面上创建一个新会话。
+    逻辑：点击 "New chat" 按钮并在确认对话框中点击 "Discard and continue"。
+    若确认遮罩已存在，则直接点击确认。
+    返回 True 表示成功触发新会话创建；失败返回 False。
+    """
+    logger.info(f"[{req_id}] 尝试创建新会话 (New chat)...")
+    try:
+        clear_chat_button = page.locator(CLEAR_CHAT_BUTTON_SELECTOR)
+        confirm_button = page.locator(CLEAR_CHAT_CONFIRM_BUTTON_SELECTOR)
+        overlay_locator = page.locator(OVERLAY_SELECTOR)
+
+        # 若确认遮罩已显示，直接确认
+        overlay_visible = False
+        try:
+            overlay_visible = await overlay_locator.is_visible(timeout=500)
+        except Exception:
+            overlay_visible = False
+
+        if overlay_visible:
+            logger.info(f"[{req_id}] 确认遮罩已存在，直接点击确认按钮...")
+            await confirm_button.click(timeout=CLICK_TIMEOUT_MS)
+        else:
+            logger.info(f"[{req_id}] 点击 'New chat' 按钮...")
+            try:
+                await clear_chat_button.click(timeout=CLICK_TIMEOUT_MS)
+            except Exception as first_click_err:
+                logger.warning(f"[{req_id}] 'New chat' 按钮首次点击失败，尝试清理遮罩后强制点击: {first_click_err}")
+                try:
+                    await page.keyboard.press('Escape')
+                    await asyncio.sleep(0.2)
+                except Exception:
+                    pass
+                await clear_chat_button.click(timeout=CLICK_TIMEOUT_MS, force=True)
+
+            # 等待确认遮罩出现
+            try:
+                await overlay_locator.wait_for(state='visible', timeout=WAIT_FOR_ELEMENT_TIMEOUT_MS)
+                logger.info(f"[{req_id}] 新会话确认遮罩已出现，点击确认按钮...")
+            except Exception as overlay_err:
+                logger.error(f"[{req_id}] 等待新会话确认遮罩出现超时/失败: {overlay_err}")
+                await save_error_snapshot(f"new_chat_overlay_timeout_{req_id}")
+                return False
+
+            await confirm_button.click(timeout=CLICK_TIMEOUT_MS)
+
+        # 尝试等待遮罩消失（不强制失败）
+        try:
+            await overlay_locator.wait_for(state='hidden', timeout=3000)
+        except Exception:
+            pass
+
+        # 简单验证：页面URL包含 new_chat 视为已创建，会话输入框应为空由后续流程保障
+        try:
+            url = page.url.rstrip('/')
+            if 'new_chat' in url:
+                logger.info(f"[{req_id}] ✅ 已进入新会话页面: {url}")
+        except Exception:
+            pass
+
+        return True
+    except Exception as e:
+        logger.exception(f"[{req_id}] 创建新会话时发生错误")
+        try:
+            await save_error_snapshot(f"new_chat_error_{req_id}")
+        except Exception:
+            pass
+        return False
