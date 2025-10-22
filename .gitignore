@@ -8,6 +8,7 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 /upload_images
+/upload_files
 
 # Diagnostic reports (https://nodejs.org/api/report.html)
 report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
@@ -249,8 +250,3 @@ browser_utils/generated_*.js
 # Docker 环境的实际配置文件（保留示例文件）
 docker/.env
 docker/my_*.json
-
-.env
-/__pycache__
-/errors_py
-/logs

@@ -20,7 +20,8 @@
 AIstudioProxyAPI/
 ├── api_utils/              # FastAPI 应用核心模块
 │   ├── app.py             # FastAPI 应用入口和生命周期管理
-│   ├── routes.py          # API 路由定义和端点实现
+│   ├── routers/           # API 路由定义（按职责拆分）
+│   ├── routes.py          # 兼容层：重导出 routers/* 端点
 │   ├── request_processor.py # 请求处理核心逻辑
 │   ├── queue_worker.py    # 异步队列工作器
 │   ├── auth_utils.py      # API 密钥认证管理
@@ -63,13 +64,18 @@ AIstudioProxyAPI/
 - 中间件配置 (API 密钥认证)
 - 全局状态初始化
 
-#### routes.py - API 路由
+#### routers/* - API 路由（按职责拆分）
 
-- `/v1/chat/completions` - 聊天完成端点
-- `/v1/models` - 模型列表端点
-- `/api/keys/*` - API 密钥管理端点
-- `/health` - 健康检查端点
-- WebSocket 日志端点
+- static.py: `/`, `/webui.css`, `/webui.js`
+- info.py: `/api/info`
+- health.py: `/health`
+- models.py: `/v1/models`
+- chat.py: `/v1/chat/completions`
+- queue.py: `/v1/queue`, `/v1/cancel/{req_id}`
+- logs_ws.py: `/ws/logs`
+- api_keys.py: `/api/keys*`
+
+应用层从 `api_utils.routers` 导入进行注册，已移除旧的集中式 `routes.py` 文件。
 
 #### request_processor.py - 请求处理核心
 
@@ -161,6 +167,23 @@ AIstudioProxyAPI/
 - **方式**: 浏览器自动化操作
 - **优势**: 完整参数支持，最终后备
 - **适用**: 调试模式，参数精确控制
+
+## 🧭 请求处理路径（辅助流/Playwright）
+
+- 辅助流路径（STREAM）：
+  - 入口：`_handle_auxiliary_stream_response`
+  - 生成器：`_gen_sse_from_aux_stream`（从 `STREAM_QUEUE` 消费，产出 OpenAI 兼容 SSE，携带 tool_calls 和 usage）
+  - 适合：高性能场景，SSE 首选
+
+- Playwright 路径（页面）：
+  - 入口：`_handle_playwright_response`
+  - 生成器：`_gen_sse_from_playwright`（通过 `PageController.get_response` 拉取最终文本，按行/字符分块输出，附带 usage）
+  - 适合：作为回退路径，确保功能完整
+
+两条路径均保持：
+- 客户端断开检测与提前结束
+- 最终使用统计 `usage` 的输出
+- OpenAI 兼容的 SSE/JSON 格式
 
 ## 🔐 认证系统架构
 

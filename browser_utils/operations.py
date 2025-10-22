@@ -12,7 +12,14 @@ from typing import Optional, Any, List, Dict, Callable, Set
 from playwright.async_api import Page as AsyncPage, Locator, Error as PlaywrightAsyncError
 
 # 导入配置和模型
-from config import *
+from config import (
+    DEBUG_LOGS_ENABLED,
+    MODELS_ENDPOINT_URL_CONTAINS,
+    ERROR_TOAST_SELECTOR,
+    CLICK_TIMEOUT_MS,
+    RESPONSE_COMPLETION_TIMEOUT,
+    INITIAL_WAIT_MS_BEFORE_POLLING,
+)
 from models import ClientDisconnectedError
 
 logger = logging.getLogger("AIStudioProxyServer")
@@ -780,28 +787,4 @@ async def _get_final_response_content(
     
     logger.error(f"[{req_id}] (Helper GetContent) 所有获取响应内容的方法均失败。")
     await save_error_snapshot(f"get_content_all_methods_failed_{req_id}")
-    return None
-
-async def create_new_chat(page: AsyncPage, req_id: str) -> bool:
-    """Clicks the 'New Chat' button and confirms to start a new chat session."""
-    logger.info(f"[{req_id}] Attempting to create a new chat...")
-    try:
-        # Click the main "New chat" button
-        new_chat_button = page.locator(CLEAR_CHAT_BUTTON_SELECTOR)
-        await new_chat_button.wait_for(state='visible', timeout=5000)
-        await new_chat_button.click()
-        logger.info(f"[{req_id}] 'New chat' button clicked.")
-
-        # Click the confirmation button
-        confirm_button = page.locator(CLEAR_CHAT_CONFIRM_BUTTON_SELECTOR)
-        await confirm_button.wait_for(state='visible', timeout=5000)
-        await confirm_button.click()
-        logger.info(f"[{req_id}] 'Discard and continue' confirmation button clicked.")
-        
-        logger.info(f"[{req_id}] New chat created successfully.")
-        return True
-    except Exception as e:
-        logger.error(f"[{req_id}] Failed to create a new chat: {e}")
-        await save_error_snapshot(f"create_new_chat_failed_{req_id}")
-        return False
- 
+    return None 

@@ -18,7 +18,7 @@ from typing import Callable, Awaitable
 from playwright.async_api import Browser as AsyncBrowser, Playwright as AsyncPlaywright
 
 # --- FIX: Replaced star import with explicit imports ---
-from config import NO_PROXY_ENV, EXCLUDED_MODELS_FILENAME
+from config import NO_PROXY_ENV, EXCLUDED_MODELS_FILENAME, get_environment_variable
 
 # --- models模块导入 ---
 from models import WebSocketConnectionManager
@@ -72,8 +72,8 @@ STREAM_PROCESS = None
 # --- Lifespan Context Manager ---
 def _setup_logging():
     import server
-    log_level_env = os.environ.get('SERVER_LOG_LEVEL', 'INFO')
-    redirect_print_env = os.environ.get('SERVER_REDIRECT_PRINT', 'false')
+    log_level_env = get_environment_variable('SERVER_LOG_LEVEL', 'INFO')
+    redirect_print_env = get_environment_variable('SERVER_REDIRECT_PRINT', 'false')
     server.log_ws_manager = WebSocketConnectionManager()
     return setup_server_logging(
         logger_instance=server.logger,
@@ -93,9 +93,9 @@ def _initialize_globals():
 
 def _initialize_proxy_settings():
     import server
-    STREAM_PORT = os.environ.get('STREAM_PORT')
+    STREAM_PORT = get_environment_variable('STREAM_PORT')
     if STREAM_PORT == '0':
-        PROXY_SERVER_ENV = os.environ.get('HTTPS_PROXY') or os.environ.get('HTTP_PROXY')
+        PROXY_SERVER_ENV = get_environment_variable('HTTPS_PROXY') or get_environment_variable('HTTP_PROXY')
     else:
         PROXY_SERVER_ENV = f"http://127.0.0.1:{STREAM_PORT or 3120}/"
     
@@ -109,10 +109,14 @@ def _initialize_proxy_settings():
 
 async def _start_stream_proxy():
     import server
-    STREAM_PORT = os.environ.get('STREAM_PORT')
+    STREAM_PORT = get_environment_variable('STREAM_PORT')
     if STREAM_PORT != '0':
         port = int(STREAM_PORT or 3120)
-        STREAM_PROXY_SERVER_ENV = os.environ.get('UNIFIED_PROXY_CONFIG') or os.environ.get('HTTPS_PROXY') or os.environ.get('HTTP_PROXY')
+        STREAM_PROXY_SERVER_ENV = (
+            get_environment_variable('UNIFIED_PROXY_CONFIG')
+            or get_environment_variable('HTTPS_PROXY')
+            or get_environment_variable('HTTP_PROXY')
+        )
         server.logger.info(f"Starting STREAM proxy on port {port} with upstream proxy: {STREAM_PROXY_SERVER_ENV}")
         server.STREAM_QUEUE = multiprocessing.Queue()
         server.STREAM_PROCESS = multiprocessing.Process(target=stream.start, args=(server.STREAM_QUEUE, port, STREAM_PROXY_SERVER_ENV))
@@ -141,8 +145,8 @@ async def _initialize_browser_and_page():
     server.is_playwright_ready = True
     server.logger.info("Playwright started.")
 
-    ws_endpoint = os.environ.get('CAMOUFOX_WS_ENDPOINT')
-    launch_mode = os.environ.get('LAUNCH_MODE', 'unknown')
+    ws_endpoint = get_environment_variable('CAMOUFOX_WS_ENDPOINT')
+    launch_mode = get_environment_variable('LAUNCH_MODE', 'unknown')
 
     if not ws_endpoint and launch_mode != "direct_debug_no_browser":
         raise ValueError("CAMOUFOX_WS_ENDPOINT environment variable is missing.")
@@ -213,7 +217,7 @@ async def lifespan(app: FastAPI):
         await _start_stream_proxy()
         await _initialize_browser_and_page()
         
-        launch_mode = os.environ.get('LAUNCH_MODE', 'unknown')
+        launch_mode = get_environment_variable('LAUNCH_MODE', 'unknown')
         if server.is_page_ready or launch_mode == "direct_debug_no_browser":
             server.worker_task = asyncio.create_task(queue_worker())
             logger.info("Request processing worker started.")
@@ -300,11 +304,11 @@ def create_app() -> FastAPI:
     app.add_middleware(APIKeyAuthMiddleware)
 
     # 注册路由
-    from .routes import (
+    # Import aggregated modular routers
+    from .routers import (
         read_index, get_css, get_js, get_api_info,
         health_check, list_models, chat_completions,
         cancel_request, get_queue_status, websocket_log_endpoint,
-        new_chat_endpoint,
         get_api_keys, add_api_key, test_api_key, delete_api_key
     )
     from fastapi.responses import FileResponse
@@ -313,7 +317,6 @@ def create_app() -> FastAPI:
     app.get("/webui.css")(get_css)
     app.get("/webui.js")(get_js)
     app.get("/api/info")(get_api_info)
-    app.post("/api/new-chat")(new_chat_endpoint)
     app.get("/health")(health_check)
     app.get("/v1/models")(list_models)
     app.post("/v1/chat/completions")(chat_completions)
