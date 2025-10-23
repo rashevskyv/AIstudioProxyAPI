@@ -201,33 +201,33 @@ async def _handle_model_list_response(response: Any):
     excluded_model_ids = getattr(server, 'excluded_model_ids', set())
     
     if MODELS_ENDPOINT_URL_CONTAINS in response.url and response.ok:
-        # 检查是否在登录流程中
+        # Check whether we are in login flow
         launch_mode = os.environ.get('LAUNCH_MODE', 'debug')
         is_in_login_flow = launch_mode in ['debug'] and not getattr(server, 'is_page_ready', False)
 
         if is_in_login_flow:
-            # 在登录流程中，静默处理，不输出干扰信息
-            pass  # 静默处理，避免干扰用户输入
+            # During login, handle silently to avoid noise
+            pass
         else:
-            logger.info(f"捕获到潜在的模型列表响应来自: {response.url} (状态: {response.status})")
+            logger.info(f"Captured potential model list response from: {response.url} (status: {response.status})")
         try:
             data = await response.json()
             models_array_container = None
             if isinstance(data, list) and data:
                 if isinstance(data[0], list) and data[0] and isinstance(data[0][0], list):
                     if not is_in_login_flow:
-                        logger.info("检测到三层列表结构 data[0][0] is list. models_array_container 设置为 data[0]。")
+                        logger.info("Detected triple-nested list: data[0][0] is list. Setting models_array_container = data[0].")
                     models_array_container = data[0]
                 elif isinstance(data[0], list) and data[0] and isinstance(data[0][0], str):
                     if not is_in_login_flow:
-                        logger.info("检测到两层列表结构 data[0][0] is str. models_array_container 设置为 data。")
+                        logger.info("Detected double-nested list: data[0][0] is str. Setting models_array_container = data.")
                     models_array_container = data
                 elif isinstance(data[0], dict):
                     if not is_in_login_flow:
-                        logger.info("检测到根列表，元素为字典。直接使用 data 作为 models_array_container。")
+                        logger.info("Detected top-level list of dicts. Using data as models_array_container.")
                     models_array_container = data
                 else:
-                    logger.warning(f"未知的列表嵌套结构。data[0] 类型: {type(data[0]) if data else 'N/A'}。data[0] 预览: {str(data[0])[:200] if data else 'N/A'}")
+                    logger.warning(f"Unknown list nesting. data[0] type: {type(data[0]) if data else 'N/A'}. Preview of data[0]: {str(data[0])[:200] if data else 'N/A'}")
             elif isinstance(data, dict):
                 if 'data' in data and isinstance(data['data'], list):
                     models_array_container = data['data']
@@ -237,7 +237,7 @@ async def _handle_model_list_response(response: Any):
                     for key, value in data.items():
                         if isinstance(value, list) and len(value) > 0 and isinstance(value[0], (dict, list)):
                             models_array_container = value
-                            logger.info(f"模型列表数据在 '{key}' 键下通过启发式搜索找到。")
+                            logger.info(f"Model list array heuristically found under key '{key}'.")
                             break
                     if models_array_container is None:
                         logger.warning("在字典响应中未能自动定位模型列表数组。")
@@ -245,7 +245,7 @@ async def _handle_model_list_response(response: Any):
                             model_list_fetch_event.set()
                         return
             else:
-                logger.warning(f"接收到的模型列表数据既不是列表也不是字典: {type(data)}")
+                logger.warning(f"Model list response is neither list nor dict: {type(data)}")
                 if model_list_fetch_event and not model_list_fetch_event.is_set(): 
                     model_list_fetch_event.set()
                 return
@@ -295,18 +295,18 @@ async def _handle_model_list_response(response: Any):
                                     default_max_output_tokens_val = val_int
                                     supported_max_output_tokens_val = val_int
                                 except (ValueError, TypeError):
-                                    logger.warning(f"模型 {current_model_id_for_log}: 无法将列表索引6的值 '{model_fields_list[6]}' 解析为 max_output_tokens。")
+                                    logger.warning(f"Model {current_model_id_for_log}: Cannot parse list index 6 value '{model_fields_list[6]}' as max_output_tokens.")
                             
                             if len(model_fields_list) > 9 and model_fields_list[9] is not None:
                                 try:
                                     raw_top_p = float(model_fields_list[9])
                                     if not (0.0 <= raw_top_p <= 1.0):
-                                        logger.warning(f"模型 {current_model_id_for_log}: 原始 top_p 值 {raw_top_p} (来自列表索引9) 超出 [0,1] 范围，将裁剪。")
+                                        logger.warning(f"Model {current_model_id_for_log}: Raw top_p {raw_top_p} (from list index 9) out of [0,1], will clamp.")
                                         default_top_p_val = max(0.0, min(1.0, raw_top_p))
                                     else:
                                         default_top_p_val = raw_top_p
                                 except (ValueError, TypeError):
-                                    logger.warning(f"模型 {current_model_id_for_log}: 无法将列表索引9的值 '{model_fields_list[9]}' 解析为 top_p。")
+                                    logger.warning(f"Model {current_model_id_for_log}: Cannot parse list index 9 value '{model_fields_list[9]}' as top_p.")
                                     
                         elif isinstance(model_fields_list, dict):
                             model_id_path_str = str(model_fields_list.get('id', model_fields_list.get('model_id', model_fields_list.get('modelId'))))
@@ -321,38 +321,38 @@ async def _handle_model_list_response(response: Any):
                                     default_max_output_tokens_val = val_int
                                     supported_max_output_tokens_val = val_int
                                 except (ValueError, TypeError):
-                                     logger.warning(f"模型 {current_model_id_for_log}: 无法将字典值 '{mot_parsed}' 解析为 max_output_tokens。")
+                                     logger.warning(f"Model {current_model_id_for_log}: Cannot parse dict value '{mot_parsed}' as max_output_tokens.")
                             
                             top_p_parsed = model_fields_list.get('topP', model_fields_list.get('defaultTopP'))
                             if top_p_parsed is not None:
                                 try:
                                     raw_top_p = float(top_p_parsed)
                                     if not (0.0 <= raw_top_p <= 1.0):
-                                        logger.warning(f"模型 {current_model_id_for_log}: 原始 top_p 值 {raw_top_p} (来自字典) 超出 [0,1] 范围，将裁剪。")
+                                        logger.warning(f"Model {current_model_id_for_log}: Raw top_p {raw_top_p} (from dict) out of [0,1], will clamp.")
                                         default_top_p_val = max(0.0, min(1.0, raw_top_p))
                                     else:
                                         default_top_p_val = raw_top_p
                                 except (ValueError, TypeError):
-                                    logger.warning(f"模型 {current_model_id_for_log}: 无法将字典值 '{top_p_parsed}' 解析为 top_p。")
+                                    logger.warning(f"Model {current_model_id_for_log}: Cannot parse dict value '{top_p_parsed}' as top_p.")
                             
                             temp_parsed = model_fields_list.get('temperature', model_fields_list.get('defaultTemperature'))
                             if temp_parsed is not None:
                                 try: 
                                     default_temperature_val = float(temp_parsed)
                                 except (ValueError, TypeError):
-                                    logger.warning(f"模型 {current_model_id_for_log}: 无法将字典值 '{temp_parsed}' 解析为 temperature。")
+                                    logger.warning(f"Model {current_model_id_for_log}: Cannot parse dict value '{temp_parsed}' as temperature.")
                         else:
                             logger.debug(f"Skipping entry because model_fields_list is not list or dict: {type(model_fields_list)}")
                             continue
                     except Exception as e_parse_fields:
-                        logger.error(f"解析模型字段时出错 for entry {str(entry_in_container)[:100]}: {e_parse_fields}")
+                        logger.error(f"Error parsing model fields for entry {str(entry_in_container)[:100]}: {e_parse_fields}")
                         continue
                     
                     if model_id_path_str and model_id_path_str.lower() != "none":
                         simple_model_id_str = model_id_path_str.split('/')[-1] if '/' in model_id_path_str else model_id_path_str
                         if simple_model_id_str in excluded_model_ids:
                             if not is_in_login_flow:
-                                logger.info(f"模型 '{simple_model_id_str}' 在排除列表 excluded_model_ids 中，已跳过。")
+                                logger.info(f"Model '{simple_model_id_str}' is in excluded_model_ids; skipping.")
                             continue
                         
                         final_display_name_str = display_name_candidate if display_name_candidate else simple_model_id_str.replace("-", " ").title()
@@ -401,20 +401,20 @@ async def _handle_model_list_response(response: Any):
                     if model_list_fetch_event and not model_list_fetch_event.is_set():
                         model_list_fetch_event.set()
                 elif not server.parsed_model_list:
-                    logger.warning("解析后模型列表仍为空。")
+                    logger.warning("Parsed model list still empty.")
                     if model_list_fetch_event and not model_list_fetch_event.is_set(): 
                         model_list_fetch_event.set()
             else:
-                logger.warning("models_array_container 为 None，无法解析模型列表。")
+                logger.warning("models_array_container is None; cannot parse model list.")
                 if model_list_fetch_event and not model_list_fetch_event.is_set(): 
                     model_list_fetch_event.set()
         except json.JSONDecodeError as json_err:
-            logger.error(f"解析模型列表JSON失败: {json_err}. 响应 (前500字): {await response.text()[:500]}")
+            logger.error(f"Failed to parse model list JSON: {json_err}. Response (first 500 chars): {await response.text()[:500]}")
         except Exception as e_handle_list_resp:
-            logger.exception(f"处理模型列表响应时发生未知错误: {e_handle_list_resp}")
+            logger.exception(f"Unknown error while handling model list response: {e_handle_list_resp}")
         finally:
             if model_list_fetch_event and not model_list_fetch_event.is_set():
-                logger.info("处理模型列表响应结束，强制设置 model_list_fetch_event。")
+                logger.info("Model list response handling finished; force-setting model_list_fetch_event.")
                 model_list_fetch_event.set()
 
 async def detect_and_extract_page_error(page: AsyncPage, req_id: str) -> Optional[str]:
@@ -802,7 +802,7 @@ async def create_new_chat(page: AsyncPage, req_id: str) -> bool:
     若确认遮罩已存在，则直接点击确认。
     返回 True 表示成功触发新会话创建；失败返回 False。
     """
-    logger.info(f"[{req_id}] 尝试创建新会话 (New chat)...")
+    logger.info(f"[{req_id}] ACTION: Attempting to create a new chat...")
     try:
         clear_chat_button = page.locator(CLEAR_CHAT_BUTTON_SELECTOR)
         confirm_button = page.locator(CLEAR_CHAT_CONFIRM_BUTTON_SELECTOR)
@@ -816,14 +816,14 @@ async def create_new_chat(page: AsyncPage, req_id: str) -> bool:
             overlay_visible = False
 
         if overlay_visible:
-            logger.info(f"[{req_id}] 确认遮罩已存在，直接点击确认按钮...")
+            logger.info(f"[{req_id}] Confirm overlay present; clicking confirm button...")
             await confirm_button.click(timeout=CLICK_TIMEOUT_MS)
         else:
-            logger.info(f"[{req_id}] 点击 'New chat' 按钮...")
+            logger.info(f"[{req_id}] Clicking 'New chat' button...")
             try:
                 await clear_chat_button.click(timeout=CLICK_TIMEOUT_MS)
             except Exception as first_click_err:
-                logger.warning(f"[{req_id}] 'New chat' 按钮首次点击失败，尝试清理遮罩后强制点击: {first_click_err}")
+                logger.warning(f"[{req_id}] First click on 'New chat' failed; attempting to clear overlay and force click: {first_click_err}")
                 try:
                     await page.keyboard.press('Escape')
                     await asyncio.sleep(0.2)
@@ -834,9 +834,9 @@ async def create_new_chat(page: AsyncPage, req_id: str) -> bool:
             # 等待确认遮罩出现
             try:
                 await overlay_locator.wait_for(state='visible', timeout=WAIT_FOR_ELEMENT_TIMEOUT_MS)
-                logger.info(f"[{req_id}] 新会话确认遮罩已出现，点击确认按钮...")
+                logger.info(f"[{req_id}] New chat confirmation overlay appeared; clicking confirm...")
             except Exception as overlay_err:
-                logger.error(f"[{req_id}] 等待新会话确认遮罩出现超时/失败: {overlay_err}")
+                logger.error(f"[{req_id}] Timeout/failure waiting for new chat confirmation overlay: {overlay_err}")
                 await save_error_snapshot(f"new_chat_overlay_timeout_{req_id}")
                 return False
 
@@ -852,13 +852,13 @@ async def create_new_chat(page: AsyncPage, req_id: str) -> bool:
         try:
             url = page.url.rstrip('/')
             if 'new_chat' in url:
-                logger.info(f"[{req_id}] ✅ 已进入新会话页面: {url}")
+                logger.info(f"[{req_id}] ACTION-SUCCESS: Entered new chat page: {url}")
         except Exception:
             pass
 
         return True
     except Exception as e:
-        logger.exception(f"[{req_id}] 创建新会话时发生错误")
+        logger.exception(f"[{req_id}] ACTION-FAIL: Error while creating new chat")
         try:
             await save_error_snapshot(f"new_chat_error_{req_id}")
         except Exception:

@@ -65,13 +65,14 @@ async def new_chat_endpoint(
     logger: logging.Logger = Depends(get_logger)
 ) -> JSONResponse:
     req_id = ''.join(random.choices('abcdefghijklmnopqrstuvwxyz0123456789', k=7))
-    logger.info(f"[{req_id}] 收到创建新会话请求 /api/new-chat")
+    logger.info(f"[{req_id}] ACTION: /api/new-chat requested (create new chat)")
     if not page_instance or page_instance.is_closed():
-        logger.error(f"[{req_id}] 无法创建新会话，页面不可用。")
+        logger.error(f"[{req_id}] ACTION-FAIL: new chat - browser page not available")
         raise HTTPException(status_code=503, detail="Browser page is not available.")
 
     success = await create_new_chat(page_instance, req_id)
     if success:
+        logger.info(f"[{req_id}] ACTION-SUCCESS: new chat created")
         return JSONResponse(content={"success": True, "message": "New chat created successfully."})
     else:
         raise HTTPException(status_code=500, detail="Failed to create a new chat.")
@@ -82,7 +83,7 @@ async def click_run_endpoint(
     logger: logging.Logger = Depends(get_logger)
 ) -> JSONResponse:
     req_id = ''.join(random.choices('abcdefghijklmnopqrstuvwxyz0123456789', k=7))
-    logger.info(f"[{req_id}] Received /api/click-run request")
+    logger.info(f"[{req_id}] ACTION: /api/click-run requested (click Run)")
     if not page_instance or page_instance.is_closed():
         raise HTTPException(status_code=503, detail="Browser page is not available.")
     try:
@@ -92,6 +93,7 @@ async def click_run_endpoint(
     delay_ms = int(body.get('delay_ms', 0) or 0)
     ok = await click_run_button(page_instance, req_id, delay_ms=delay_ms)
     if ok:
+        logger.info(f"[{req_id}] ACTION-SUCCESS: Run clicked (delay_ms={delay_ms})")
         return JSONResponse(content={"success": True, "message": "Run clicked.", "delay_ms": delay_ms})
     raise HTTPException(status_code=500, detail="Failed to click Run.")
 
@@ -101,7 +103,7 @@ async def click_stop_endpoint(
     logger: logging.Logger = Depends(get_logger)
 ) -> JSONResponse:
     req_id = ''.join(random.choices('abcdefghijklmnopqrstuvwxyz0123456789', k=7))
-    logger.info(f"[{req_id}] Received /api/click-stop request")
+    logger.info(f"[{req_id}] ACTION: /api/click-stop requested (click Stop)")
     if not page_instance or page_instance.is_closed():
         raise HTTPException(status_code=503, detail="Browser page is not available.")
     try:
@@ -111,5 +113,6 @@ async def click_stop_endpoint(
     delay_ms = int(body.get('delay_ms', 0) or 0)
     ok = await click_stop_button(page_instance, req_id, delay_ms=delay_ms)
     if ok:
+        logger.info(f"[{req_id}] ACTION-SUCCESS: Stop clicked (delay_ms={delay_ms})")
         return JSONResponse(content={"success": True, "message": "Stop clicked.", "delay_ms": delay_ms})
     raise HTTPException(status_code=500, detail="Failed to click Stop.")
