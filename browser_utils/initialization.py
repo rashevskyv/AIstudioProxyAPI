@@ -653,7 +653,7 @@ async def enable_temporary_chat_mode(page: AsyncPage):
     这是一个独立的UI操作，应该在页面完全稳定后调用。
     """
     try:
-        logger.info("-> (UI Op) 正在检查并启用 '临时聊天' 模式...")
+        logger.info("-> (UI Op) Checking and enabling 'Temporary chat' mode...")
         
         incognito_button_locator = page.locator('button[aria-label="Temporary chat toggle"]')
         
@@ -662,17 +662,17 @@ async def enable_temporary_chat_mode(page: AsyncPage):
         button_classes = await incognito_button_locator.get_attribute("class")
         
         if button_classes and 'ms-button-active' in button_classes:
-            logger.info("-> (UI Op) '临时聊天' 模式已激活。")
+            logger.info("-> (UI Op) 'Temporary chat' mode is active.")
         else:
-            logger.info("-> (UI Op) '临时聊天' 模式未激活，正在点击...")
+            logger.info("-> (UI Op) 'Temporary chat' mode is not active; clicking...")
             await incognito_button_locator.click(timeout=5000, force=True)
             await asyncio.sleep(1)
             
             updated_classes = await incognito_button_locator.get_attribute("class")
             if updated_classes and 'ms-button-active' in updated_classes:
-                logger.info("✅ (UI Op) '临时聊天' 模式已成功启用。")
+                logger.info("✅ (UI Op) 'Temporary chat' mode enabled successfully.")
             else:
-                logger.warning("⚠️ (UI Op) 点击后 '临时聊天' 模式状态验证失败。")
+                logger.warning("⚠️ (UI Op) After click, 'Temporary chat' mode state validation failed.")
 
     except Exception as e:
-        logger.warning(f"⚠️ (UI Op) 启用 '临时聊天' 模式时出错: {e}")
+        logger.warning(f"⚠️ (UI Op) Error enabling 'Temporary chat' mode: {e}")
