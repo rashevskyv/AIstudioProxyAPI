@@ -887,19 +887,19 @@ class PageController:
                 if not ok:
                     self.logger.error(f"[{self.req_id}] 在上传文件时发生错误: 通过菜单方式未能设置文件")
 
-            # 若存在清空聊天确认遮罩，先处理以免阻挡提交
+            # If clear-chat confirmation overlay exists, handle it to avoid blocking submission
             try:
                 overlay_locator = self.page.locator(OVERLAY_SELECTOR)
                 if await overlay_locator.count() > 0:
-                    self.logger.info(f"[{self.req_id}] 检测到遮罩层，尝试点击确认继续...")
+                    self.logger.info(f"[{self.req_id}] Detected overlay; trying to click 'Discard and continue'...")
                     confirm_button_locator = self.page.locator(CLEAR_CHAT_CONFIRM_BUTTON_SELECTOR)
                     try:
                         await expect_async(confirm_button_locator).to_be_visible(timeout=2000)
                         await confirm_button_locator.click(timeout=CLICK_TIMEOUT_MS)
-                        self.logger.info(f"[{self.req_id}] ✅ 已点击确认继续按钮，等待遮罩消失")
+                        self.logger.info(f"[{self.req_id}] ✅ Clicked 'Discard and continue'. Waiting for overlay to disappear...")
                         await expect_async(overlay_locator).to_be_hidden(timeout=5000)
                     except Exception as confirm_err:
-                        self.logger.warning(f"[{self.req_id}] ⚠️ 处理遮罩确认时出错或按钮不可见: {confirm_err}")
+                        self.logger.warning(f"[{self.req_id}] ⚠️ Failed to handle overlay confirmation or button not visible: {confirm_err}")
             except Exception:
                 pass
 
@@ -915,29 +915,32 @@ class PageController:
                 raise
 
             await self._check_disconnect(check_client_disconnected, "After Submit Button Enabled")
-            await asyncio.sleep(0.3)
-
-            # 优先回车提交，其次按钮提交，最后组合键提交
-            submitted_successfully = await self._try_enter_submit(prompt_textarea_locator, check_client_disconnected)
-            if not submitted_successfully:
-                self.logger.info(f"[{self.req_id}] 回车提交失败，尝试点击提交按钮...")
-                button_clicked = False
-                try:
-                    # 提交前再处理一次潜在对话框，避免按钮点击被拦截
-                    await self._handle_post_upload_dialog()
+            self.logger.info(f"[{self.req_id}] Delaying 3s before clicking Run (1/2)...")
+            await asyncio.sleep(3.0)
+            try:
+                await self._handle_post_upload_dialog()
+            except Exception:
+                pass
+            try:
+                if await submit_button_locator.is_enabled(timeout=1000):
                     await submit_button_locator.click(timeout=5000)
-                    self.logger.info(f"[{self.req_id}] ✅ 提交按钮点击完成。")
-                    button_clicked = True
-                except Exception as click_err:
-                    self.logger.error(f"[{self.req_id}] ❌ 提交按钮点击失败: {click_err}")
-                    await save_error_snapshot(f"submit_button_click_fail_{self.req_id}")
+                    self.logger.info(f"[{self.req_id}] ✅ Run clicked (1/2).")
+                else:
+                    self.logger.info(f"[{self.req_id}] Run seems disabled before first click; proceeding anyway.")
+            except Exception as click_err:
+                self.logger.error(f"[{self.req_id}] ❌ First Run click failed: {click_err}")
+                await save_error_snapshot(f"submit_button_click_fail_1_{self.req_id}")
 
-                if not button_clicked:
-                    self.logger.info(f"[{self.req_id}] 按钮提交失败，尝试组合键提交...")
-                    combo_ok = await self._try_combo_submit(prompt_textarea_locator, check_client_disconnected)
-                    if not combo_ok:
-                        self.logger.error(f"[{self.req_id}] ❌ 组合键提交也失败。")
-                        raise Exception("Submit failed: Enter, Button, and Combo key all failed")
+            self.logger.info(f"[{self.req_id}] Waiting another 3s before clicking Run again (2/2)...")
+            await asyncio.sleep(3.0)
+            try:
+                if await submit_button_locator.is_enabled(timeout=1000):
+                    await submit_button_locator.click(timeout=5000)
+                    self.logger.info(f"[{self.req_id}] ✅ Run clicked (2/2).")
+                else:
+                    self.logger.info(f"[{self.req_id}] Run disabled at second attempt; likely already submitting.")
+            except Exception as click_err2:
+                self.logger.warning(f"[{self.req_id}] ⚠️ Second Run click attempt failed: {click_err2}")
 
             await self._check_disconnect(check_client_disconnected, "After Submit")
 
