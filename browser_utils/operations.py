@@ -23,6 +23,7 @@ from config import (
     CLEAR_CHAT_CONFIRM_BUTTON_SELECTOR,
     OVERLAY_SELECTOR,
     WAIT_FOR_ELEMENT_TIMEOUT_MS,
+    SUBMIT_BUTTON_SELECTOR,
 )
 from models import ClientDisconnectedError
 
@@ -861,4 +862,45 @@ async def create_new_chat(page: AsyncPage, req_id: str) -> bool:
             await save_error_snapshot(f"new_chat_error_{req_id}")
         except Exception:
             pass
+        return False
+
+async def click_run_button(page: AsyncPage, req_id: str, delay_ms: int = 0) -> bool:
+    """Click the Run button optionally after a delay; auto-handle overlay confirmation and enable state."""
+    try:
+        submit_button = page.locator(SUBMIT_BUTTON_SELECTOR)
+        overlay_locator = page.locator(OVERLAY_SELECTOR)
+        confirm_button = page.locator(CLEAR_CHAT_CONFIRM_BUTTON_SELECTOR)
+
+        if delay_ms and delay_ms > 0:
+            await asyncio.sleep(delay_ms / 1000.0)
+
+        # If overlay present, confirm first
+        try:
+            if await overlay_locator.count() > 0:
+                await confirm_button.click(timeout=CLICK_TIMEOUT_MS)
+                try:
+                    await overlay_locator.wait_for(state='hidden', timeout=3000)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+        # Ensure button enabled before click (best-effort)
+        try:
+            await submit_button.wait_for(state='visible', timeout=3000)
+        except Exception:
+            pass
+        try:
+            if await submit_button.is_enabled(timeout=1000):
+                await submit_button.click(timeout=CLICK_TIMEOUT_MS)
+                logger.info(f"[{req_id}] ✅ Run button clicked.")
+                return True
+        except Exception as click_err:
+            logger.warning(f"[{req_id}] ⚠️ Run click failed: {click_err}")
+            return False
+
+        logger.info(f"[{req_id}] Run button not enabled; skipping click.")
+        return False
+    except Exception as e:
+        logger.error(f"[{req_id}] ❌ Error in click_run_button: {e}")
         return False

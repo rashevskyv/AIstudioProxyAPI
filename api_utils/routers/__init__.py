@@ -8,7 +8,7 @@ from .static import read_index, get_css, get_js
 from .info import get_api_info
 from .health import health_check
 from .models import list_models
-from .chat import chat_completions, new_chat_endpoint
+from .chat import chat_completions, new_chat_endpoint, click_run_endpoint
 from .queue import cancel_request, get_queue_status
 from .logs_ws import websocket_log_endpoint
 from .api_keys import get_api_keys, add_api_key, test_api_key, delete_api_key
@@ -18,7 +18,7 @@ __all__ = [
     'get_api_info',
     'health_check',
     'list_models',
-    'chat_completions', 'new_chat_endpoint',
+    'chat_completions', 'new_chat_endpoint', 'click_run_endpoint',
     'cancel_request', 'get_queue_status',
     'websocket_log_endpoint',
     'get_api_keys', 'add_api_key', 'test_api_key', 'delete_api_key'
