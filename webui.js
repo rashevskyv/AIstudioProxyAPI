@@ -448,12 +448,6 @@ async function sendMessage() {
         return;
     }
 
-    // е†Ќж¬ЎжЈЂжџҐиѕ“е…ҐжЎ†е†…е®№пј€йІж­ўењЁе¤„зђ†иї‡зЁ‹дё­иў«жё…з©єпј‰
-    if (!userInput.value.trim()) {
-        addLogEntry('[Warning] Input cleared; request cancelled.');
-        return;
-    }
-
     userInput.disabled = true;
     sendButton.disabled = true;
     clearButton.disabled = true;

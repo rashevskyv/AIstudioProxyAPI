@@ -887,6 +887,22 @@ class PageController:
                 if not ok:
                     self.logger.error(f"[{self.req_id}] 在上传文件时发生错误: 通过菜单方式未能设置文件")
 
+            # 若存在清空聊天确认遮罩，先处理以免阻挡提交
+            try:
+                overlay_locator = self.page.locator(OVERLAY_SELECTOR)
+                if await overlay_locator.count() > 0:
+                    self.logger.info(f"[{self.req_id}] 检测到遮罩层，尝试点击确认继续...")
+                    confirm_button_locator = self.page.locator(CLEAR_CHAT_CONFIRM_BUTTON_SELECTOR)
+                    try:
+                        await expect_async(confirm_button_locator).to_be_visible(timeout=2000)
+                        await confirm_button_locator.click(timeout=CLICK_TIMEOUT_MS)
+                        self.logger.info(f"[{self.req_id}] ✅ 已点击确认继续按钮，等待遮罩消失")
+                        await expect_async(overlay_locator).to_be_hidden(timeout=5000)
+                    except Exception as confirm_err:
+                        self.logger.warning(f"[{self.req_id}] ⚠️ 处理遮罩确认时出错或按钮不可见: {confirm_err}")
+            except Exception:
+                pass
+
             # 等待发送按钮启用
             wait_timeout_ms_submit_enabled = 100000
             try:
