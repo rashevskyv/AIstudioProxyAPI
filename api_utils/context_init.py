@@ -10,8 +10,8 @@ async def initialize_request_context(req_id: str, request: ChatCompletionRequest
         params_cache_lock,
     )
 
-    logger.info(f"[{req_id}] 开始处理请求...")
-    logger.info(f"[{req_id}]   请求参数 - Model: {request.model}, Stream: {request.stream}")
+    logger.info(f"[{req_id}] Start processing request...")
+    logger.info(f"[{req_id}]   Request params - Model: {request.model}, Stream: {request.stream}")
 
     context: RequestContext = {
         'logger': logger,

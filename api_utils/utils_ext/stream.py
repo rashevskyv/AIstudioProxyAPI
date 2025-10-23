@@ -8,10 +8,10 @@ async def use_stream_response(req_id: str) -> AsyncGenerator[Any, None]:
     import queue
 
     if STREAM_QUEUE is None:
-        logger.warning(f"[{req_id}] STREAM_QUEUE is None, 无法使用流响应")
+        logger.warning(f"[{req_id}] STREAM_QUEUE is None; cannot use stream response")
         return
 
-    logger.info(f"[{req_id}] 开始使用流响应")
+    logger.info(f"[{req_id}] Start using stream response")
 
     empty_count = 0
     max_empty_retries = 300
@@ -22,47 +22,47 @@ async def use_stream_response(req_id: str) -> AsyncGenerator[Any, None]:
             try:
                 data = STREAM_QUEUE.get_nowait()
                 if data is None:
-                    logger.info(f"[{req_id}] 接收到流结束标志")
+                    logger.info(f"[{req_id}] Received stream end marker")
                     break
                 empty_count = 0
                 data_received = True
-                logger.debug(f"[{req_id}] 接收到流数据: {type(data)} - {str(data)[:200]}...")
+                logger.debug(f"[{req_id}] Received stream data: {type(data)} - {str(data)[:200]}...")
 
                 if isinstance(data, str):
                     try:
                         parsed_data = json.loads(data)
                         if parsed_data.get("done") is True:
-                            logger.info(f"[{req_id}] 接收到JSON格式的完成标志")
+                            logger.info(f"[{req_id}] Received completion flag (JSON)")
                             yield parsed_data
                             break
                         else:
                             yield parsed_data
                     except json.JSONDecodeError:
-                        logger.debug(f"[{req_id}] 返回非JSON字符串数据")
+                        logger.debug(f"[{req_id}] Returning non-JSON string data")
                         yield data
                 else:
                     yield data
                     if isinstance(data, dict) and data.get("done") is True:
-                        logger.info(f"[{req_id}] 接收到字典格式的完成标志")
+                        logger.info(f"[{req_id}] Received completion flag (dict)")
                         break
             except (queue.Empty, asyncio.QueueEmpty):
                 empty_count += 1
                 if empty_count % 50 == 0:
-                    logger.info(f"[{req_id}] 等待流数据... ({empty_count}/{max_empty_retries})")
+                    logger.info(f"[{req_id}] Waiting for stream data... ({empty_count}/{max_empty_retries})")
                 if empty_count >= max_empty_retries:
                     if not data_received:
-                        logger.error(f"[{req_id}] 流响应队列空读取次数达到上限且未收到任何数据，可能是辅助流未启动或出错")
+                        logger.error(f"[{req_id}] Stream queue empty limit reached without any data; auxiliary stream may not have started or crashed")
                     else:
-                        logger.warning(f"[{req_id}] 流响应队列空读取次数达到上限 ({max_empty_retries})，结束读取")
+                        logger.warning(f"[{req_id}] Stream queue empty read limit reached ({max_empty_retries}); ending read")
                     yield {"done": True, "reason": "internal_timeout", "body": "", "function": []}
                     return
                 await asyncio.sleep(0.1)
                 continue
     except Exception as e:
-        logger.error(f"[{req_id}] 使用流响应时出错: {e}")
+        logger.error(f"[{req_id}] Error while using stream response: {e}")
         raise
     finally:
-        logger.info(f"[{req_id}] 流响应使用完成，数据接收状态: {data_received}")
+        logger.info(f"[{req_id}] Stream response finished. Data received: {data_received}")
 
 
 async def clear_stream_queue():
@@ -70,17 +70,16 @@ async def clear_stream_queue():
     import queue
 
     if STREAM_QUEUE is None:
-        logger.info("流队列未初始化或已被禁用，跳过清空操作。")
+        logger.info("Stream queue not initialized or disabled; skip clearing.")
         return
 
     while True:
         try:
             data_chunk = await asyncio.to_thread(STREAM_QUEUE.get_nowait)
         except queue.Empty:
-            logger.info("流式队列已清空 (捕获到 queue.Empty)。")
+            logger.info("Stream queue cleared (caught queue.Empty).")
             break
         except Exception as e:
-            logger.error(f"清空流式队列时发生意外错误: {e}", exc_info=True)
+            logger.error(f"Unexpected error while clearing stream queue: {e}", exc_info=True)
             break
-    logger.info("流式队列缓存清空完毕。")
-
+    logger.info("Stream queue buffer clearing completed.")

@@ -23,17 +23,17 @@ async def chat_completions(
     worker_task = Depends(get_worker_task)
 ) -> JSONResponse:
     req_id = ''.join(random.choices('abcdefghijklmnopqrstuvwxyz0123456789', k=7))
-    logger.info(f"[{req_id}] 收到 /v1/chat/completions 请求 (Stream={request.stream})")
+    logger.info(f"[{req_id}] Received /v1/chat/completions request (Stream={request.stream})")
 
     launch_mode = get_environment_variable('LAUNCH_MODE', 'unknown')
     browser_page_critical = launch_mode != "direct_debug_no_browser"
 
-    service_unavailable = server_state["is_initializing"] or \
+    service_unavailable_flag = server_state["is_initializing"] or \
                           not server_state["is_playwright_ready"] or \
                           (browser_page_critical and (not server_state["is_page_ready"] or not server_state["is_browser_connected"])) or \
                           not worker_task or worker_task.done()
 
-    if service_unavailable:
+    if service_unavailable_flag:
         raise service_unavailable(req_id)
 
     result_future = Future()
@@ -46,18 +46,18 @@ async def chat_completions(
         timeout_seconds = RESPONSE_COMPLETION_TIMEOUT / 1000 + 120
         return await asyncio.wait_for(result_future, timeout=timeout_seconds)
     except asyncio.TimeoutError:
-        raise HTTPException(status_code=504, detail=f"[{req_id}] 请求处理超时。")
+        raise HTTPException(status_code=504, detail=f"[{req_id}] Request processing timed out.")
     except asyncio.CancelledError:
-        raise HTTPException(status_code=499, detail=f"[{req_id}] 请求被客户端取消。")
+        raise HTTPException(status_code=499, detail=f"[{req_id}] Request was cancelled by the client.")
     except HTTPException as http_exc:
         if http_exc.status_code == 499:
-            logger.info(f"[{req_id}] 客户端断开连接: {http_exc.detail}")
+            logger.info(f"[{req_id}] Client disconnected: {http_exc.detail}")
         else:
-            logger.warning(f"[{req_id}] HTTP异常: {http_exc.detail}")
+            logger.warning(f"[{req_id}] HTTP exception: {http_exc.detail}")
         raise http_exc
     except Exception as e:
-        logger.exception(f"[{req_id}] 等待Worker响应时出错")
-        raise HTTPException(status_code=500, detail=f"[{req_id}] 服务器内部错误: {e}")
+        logger.exception(f"[{req_id}] Error while awaiting Worker response")
+        raise HTTPException(status_code=500, detail=f"[{req_id}] Internal server error: {e}")
 
 
 async def new_chat_endpoint(
