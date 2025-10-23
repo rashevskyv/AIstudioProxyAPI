@@ -11,7 +11,7 @@ import asyncio
 from fastapi.responses import JSONResponse
 from config import get_environment_variable
 from ..error_utils import service_unavailable
-from browser_utils.operations import create_new_chat, click_run_button
+from browser_utils.operations import create_new_chat, click_run_button, click_stop_button
 
 
 async def chat_completions(
@@ -94,3 +94,22 @@ async def click_run_endpoint(
     if ok:
         return JSONResponse(content={"success": True, "message": "Run clicked.", "delay_ms": delay_ms})
     raise HTTPException(status_code=500, detail="Failed to click Run.")
+
+async def click_stop_endpoint(
+    http_request: Request,
+    page_instance = Depends(get_page_instance),
+    logger: logging.Logger = Depends(get_logger)
+) -> JSONResponse:
+    req_id = ''.join(random.choices('abcdefghijklmnopqrstuvwxyz0123456789', k=7))
+    logger.info(f"[{req_id}] Received /api/click-stop request")
+    if not page_instance or page_instance.is_closed():
+        raise HTTPException(status_code=503, detail="Browser page is not available.")
+    try:
+        body = await http_request.json()
+    except Exception:
+        body = {}
+    delay_ms = int(body.get('delay_ms', 0) or 0)
+    ok = await click_stop_button(page_instance, req_id, delay_ms=delay_ms)
+    if ok:
+        return JSONResponse(content={"success": True, "message": "Stop clicked.", "delay_ms": delay_ms})
+    raise HTTPException(status_code=500, detail="Failed to click Stop.")

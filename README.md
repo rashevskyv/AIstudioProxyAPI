@@ -282,9 +282,9 @@ poetry update
 
 ---
 
-## 外部控制端点 (New chat / Click Run)
+## 外部控制端点 (New chat / Click Run / Click Stop)
 
-这些辅助端点允许从外部触发 AI Studio 页面上的 UI 操作（创建新会话、点击 Run）。仅在浏览器与页面已成功初始化时可用。
+这些辅助端点允许从外部触发 AI Studio 页面上的 UI 操作（创建新会话、点击 Run、点击 Stop）。仅在浏览器与页面已成功初始化时可用。
 
 - 鉴权：API Key 中间件仅保护以 `/v1/` 开头的端点。本文档中的 `/api/*` 端点默认不需要认证。如需保护可在反向代理上加鉴权或自定义中间件。
 - 前置条件：服务已启动，`Playwright` 正常连接浏览器，页面未关闭；一般需要配置 `CAMOUFOX_WS_ENDPOINT`（除非使用 `direct_debug_no_browser` 模式）。
@@ -356,6 +356,45 @@ curl -X POST http://127.0.0.1:2048/api/click-run \
 ```
 
 - 使用建议：如果希望在页面生成结束后“重发/再次执行”，可将 `delay_ms` 设为 300–1000ms，以规避瞬时未就绪状态。
+
+### 3) 触发 Stop 按钮 (Click Stop)
+
+- 方法：POST
+- URL：`http://127.0.0.1:2048/api/click-stop`
+- 请求体（可选）：
+
+```json
+{"delay_ms": 0}
+```
+
+- 说明：Stop 与 Run 使用同一切换按钮。调用时会尽力等待短暂的加载指示（spinner）出现以确保处于可停止状态；若存在确认遮罩，会先自动确认；若按钮未就绪/禁用，则本次不会点击。
+- 成功返回：
+
+```json
+{"success": true, "message": "Stop clicked.", "delay_ms": 0}
+```
+
+- 可能错误：
+  - `503 Browser page is not available`：浏览器页面不可用/未连接
+  - `500 Failed to click Stop`：按钮不可见/未启用或点击失败
+
+- 示例：
+
+PowerShell（500ms 延迟）
+
+```powershell
+Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:2048/api/click-stop" -ContentType "application/json" -Body '{"delay_ms":500}'
+```
+
+curl（500ms 延迟）
+
+```bash
+curl -X POST http://127.0.0.1:2048/api/click-stop \
+  -H "Content-Type: application/json" \
+  -d '{"delay_ms":500}'
+```
+
+- 使用建议：如需在客户端断开或达到配额时快速中止生成，可设置 `delay_ms` 为 100–500ms，以提高处于可停止状态时的命中概率。
 
 ---
 

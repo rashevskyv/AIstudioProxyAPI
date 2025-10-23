@@ -24,6 +24,7 @@ from config import (
     OVERLAY_SELECTOR,
     WAIT_FOR_ELEMENT_TIMEOUT_MS,
     SUBMIT_BUTTON_SELECTOR,
+    LOADING_SPINNER_SELECTOR,
 )
 from models import ClientDisconnectedError
 
@@ -903,4 +904,48 @@ async def click_run_button(page: AsyncPage, req_id: str, delay_ms: int = 0) -> b
         return False
     except Exception as e:
         logger.error(f"[{req_id}] ❌ Error in click_run_button: {e}")
+        return False
+
+async def click_stop_button(page: AsyncPage, req_id: str, delay_ms: int = 0) -> bool:
+    """Click the Stop (toggle Run) button to halt generation; waits briefly for spinner to appear if necessary."""
+    try:
+        submit_button = page.locator(SUBMIT_BUTTON_SELECTOR)
+        overlay_locator = page.locator(OVERLAY_SELECTOR)
+        confirm_button = page.locator(CLEAR_CHAT_CONFIRM_BUTTON_SELECTOR)
+        spinner_locator = page.locator(LOADING_SPINNER_SELECTOR)
+
+        if delay_ms and delay_ms > 0:
+            await asyncio.sleep(delay_ms / 1000.0)
+
+        # Handle confirm overlay if present (same as Run)
+        try:
+            if await overlay_locator.count() > 0:
+                await confirm_button.click(timeout=CLICK_TIMEOUT_MS)
+                try:
+                    await overlay_locator.wait_for(state='hidden', timeout=3000)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+        # Best-effort: if spinner visible, the button becomes "Stop" state; otherwise still click to toggle
+        try:
+            # Let the spinner appear (short wait), then attempt click
+            try:
+                await spinner_locator.first.wait_for(state='visible', timeout=1500)
+            except Exception:
+                pass
+            await submit_button.wait_for(state='visible', timeout=3000)
+            if await submit_button.is_enabled(timeout=1000):
+                await submit_button.click(timeout=CLICK_TIMEOUT_MS)
+                logger.info(f"[{req_id}] ✅ Stop button clicked (Run toggled).")
+                return True
+            else:
+                logger.info(f"[{req_id}] Stop/Run button not enabled; skipping click.")
+                return False
+        except Exception as click_err:
+            logger.warning(f"[{req_id}] ⚠️ Stop click failed: {click_err}")
+            return False
+    except Exception as e:
+        logger.error(f"[{req_id}] ❌ Error in click_stop_button: {e}")
         return False
