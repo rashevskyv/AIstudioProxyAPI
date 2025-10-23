@@ -924,23 +924,12 @@ class PageController:
             try:
                 if await submit_button_locator.is_enabled(timeout=1000):
                     await submit_button_locator.click(timeout=5000)
-                    self.logger.info(f"[{self.req_id}] ✅ Run clicked (1/2).")
+                    self.logger.info(f"[{self.req_id}] ✅ Run clicked.")
                 else:
-                    self.logger.info(f"[{self.req_id}] Run seems disabled before first click; proceeding anyway.")
+                    self.logger.info(f"[{self.req_id}] Run seems disabled before click; proceeding anyway.")
             except Exception as click_err:
-                self.logger.error(f"[{self.req_id}] ❌ First Run click failed: {click_err}")
-                await save_error_snapshot(f"submit_button_click_fail_1_{self.req_id}")
-
-            self.logger.info(f"[{self.req_id}] Waiting another 3s before clicking Run again (2/2)...")
-            await asyncio.sleep(3.0)
-            try:
-                if await submit_button_locator.is_enabled(timeout=1000):
-                    await submit_button_locator.click(timeout=5000)
-                    self.logger.info(f"[{self.req_id}] ✅ Run clicked (2/2).")
-                else:
-                    self.logger.info(f"[{self.req_id}] Run disabled at second attempt; likely already submitting.")
-            except Exception as click_err2:
-                self.logger.warning(f"[{self.req_id}] ⚠️ Second Run click attempt failed: {click_err2}")
+                self.logger.error(f"[{self.req_id}] ❌ Run click failed: {click_err}")
+                await save_error_snapshot(f"submit_button_click_fail_{self.req_id}")
 
             await self._check_disconnect(check_client_disconnected, "After Submit")
 
