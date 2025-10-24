@@ -1,5 +1,5 @@
 # --- browser_utils/model_management.py ---
-# 浏览器模型管理相关功能模块
+# Browser model management utilities
 
 import asyncio
 import json
@@ -10,7 +10,7 @@ from typing import Optional, Set
 
 from playwright.async_api import Page as AsyncPage, expect as expect_async, Error as PlaywrightAsyncError
 
-# 导入配置和模型
+# Config and models
 from config import (
     INPUT_SELECTOR,
     AI_STUDIO_URL_PATTERN,
@@ -19,33 +19,33 @@ from models import ClientDisconnectedError
 
 logger = logging.getLogger("AIStudioProxyServer")
 
-# ==================== 强制UI状态设置功能 ====================
+# ==================== Forced UI state settings ====================
 
 async def _verify_ui_state_settings(page: AsyncPage, req_id: str = "unknown") -> dict:
     """
-    验证UI状态设置是否正确
+    Verify UI state settings in localStorage
 
     Args:
-        page: Playwright页面对象
-        req_id: 请求ID用于日志
+        page: Playwright page instance
+        req_id: request ID for logging
 
     Returns:
-        dict: 包含验证结果的字典
+        dict: verification result
     """
     try:
-        logger.info(f"[{req_id}] 验证UI状态设置...")
+        logger.info(f"[{req_id}] Validating UI state settings...")
 
-        # 获取当前localStorage设置
+        # Get current localStorage settings
         prefs_str = await page.evaluate("() => localStorage.getItem('aiStudioUserPreference')")
 
         if not prefs_str:
-            logger.warning(f"[{req_id}] localStorage.aiStudioUserPreference 不存在")
+            logger.warning(f"[{req_id}] localStorage.aiStudioUserPreference not found")
             return {
                 'exists': False,
                 'isAdvancedOpen': None,
                 'areToolsOpen': None,
                 'needsUpdate': True,
-                'error': 'localStorage不存在'
+                'error': 'localStorage missing'
             }
 
         try:
@@ -53,7 +53,7 @@ async def _verify_ui_state_settings(page: AsyncPage, req_id: str = "unknown") ->
             is_advanced_open = prefs.get('isAdvancedOpen')
             are_tools_open = prefs.get('areToolsOpen')
 
-            # 检查是否需要更新
+            # Check if update needed
             needs_update = (is_advanced_open is not True) or (are_tools_open is not True)
 
             result = {
@@ -64,138 +64,138 @@ async def _verify_ui_state_settings(page: AsyncPage, req_id: str = "unknown") ->
                 'prefs': prefs
             }
 
-            logger.info(f"[{req_id}] UI状态验证结果: isAdvancedOpen={is_advanced_open}, areToolsOpen={are_tools_open} (期望: True), needsUpdate={needs_update}")
+            logger.info(f"[{req_id}] UI state verification: isAdvancedOpen={is_advanced_open}, areToolsOpen={are_tools_open} (expected: True), needsUpdate={needs_update}")
             return result
 
         except json.JSONDecodeError as e:
-            logger.error(f"[{req_id}] 解析localStorage JSON失败: {e}")
+            logger.error(f"[{req_id}] Failed to parse localStorage JSON: {e}")
             return {
                 'exists': False,
                 'isAdvancedOpen': None,
                 'areToolsOpen': None,
                 'needsUpdate': True,
-                'error': f'JSON解析失败: {e}'
+                'error': f'JSON parse failed: {e}'
             }
 
     except Exception as e:
-        logger.error(f"[{req_id}] 验证UI状态设置时发生错误: {e}")
+        logger.error(f"[{req_id}] Error validating UI state settings: {e}")
         return {
             'exists': False,
             'isAdvancedOpen': None,
             'areToolsOpen': None,
             'needsUpdate': True,
-            'error': f'验证失败: {e}'
+            'error': f'Validation failed: {e}'
         }
 
 async def _force_ui_state_settings(page: AsyncPage, req_id: str = "unknown") -> bool:
     """
-    强制设置UI状态
+    Force set UI state settings (isAdvancedOpen, areToolsOpen)
 
     Args:
-        page: Playwright页面对象
-        req_id: 请求ID用于日志
+        page: Playwright page instance
+        req_id: request ID for logging
 
     Returns:
-        bool: 设置是否成功
+        bool: whether settings were applied successfully
     """
     try:
-        logger.info(f"[{req_id}] 开始强制设置UI状态...")
+        logger.info(f"[{req_id}] Starting to force UI state settings...")
 
-        # 首先验证当前状态
+        # First verify current state
         current_state = await _verify_ui_state_settings(page, req_id)
 
         if not current_state['needsUpdate']:
-            logger.info(f"[{req_id}] UI状态已正确设置，无需更新")
+            logger.info(f"[{req_id}] UI state already correct; no update needed")
             return True
 
-        # 获取现有preferences或创建新的
+        # Get existing preferences or create new
         prefs = current_state.get('prefs', {})
 
-        # 强制设置关键配置
+        # Force key settings
         prefs['isAdvancedOpen'] = True
         prefs['areToolsOpen'] = True
 
-        # 保存到localStorage
+        # Save to localStorage
         prefs_str = json.dumps(prefs)
         await page.evaluate("(prefsStr) => localStorage.setItem('aiStudioUserPreference', prefsStr)", prefs_str)
 
-        logger.info(f"[{req_id}] 已强制设置: isAdvancedOpen=true, areToolsOpen=true")
+        logger.info(f"[{req_id}] Forced: isAdvancedOpen=true, areToolsOpen=true")
 
-        # 验证设置是否成功
+        # Verify settings were applied
         verify_state = await _verify_ui_state_settings(page, req_id)
         if not verify_state['needsUpdate']:
-            logger.info(f"[{req_id}] ✅ UI状态设置验证成功")
+            logger.info(f"[{req_id}] ✅ UI state verification successful")
             return True
         else:
-            logger.warning(f"[{req_id}] ⚠️ UI状态设置验证失败，可能需要重试")
+            logger.warning(f"[{req_id}] ⚠️ UI state verification failed; may need retry")
             return False
 
     except Exception as e:
-        logger.error(f"[{req_id}] 强制设置UI状态时发生错误: {e}")
+        logger.error(f"[{req_id}] Error while forcing UI state settings: {e}")
         return False
 
 async def _force_ui_state_with_retry(page: AsyncPage, req_id: str = "unknown", max_retries: int = 3, retry_delay: float = 1.0) -> bool:
     """
-    带重试机制的UI状态强制设置
+    Force UI state settings with retry
 
     Args:
-        page: Playwright页面对象
-        req_id: 请求ID用于日志
-        max_retries: 最大重试次数
-        retry_delay: 重试延迟（秒）
+        page: Playwright page instance
+        req_id: request ID for logging
+        max_retries: maximum retries
+        retry_delay: delay between retries (seconds)
 
     Returns:
-        bool: 设置是否最终成功
+        bool: whether settings were eventually applied
     """
     for attempt in range(1, max_retries + 1):
-        logger.info(f"[{req_id}] 尝试强制设置UI状态 (第 {attempt}/{max_retries} 次)")
+        logger.info(f"[{req_id}] Attempt to force UI state ({attempt}/{max_retries})")
 
         success = await _force_ui_state_settings(page, req_id)
         if success:
-            logger.info(f"[{req_id}] ✅ UI状态设置在第 {attempt} 次尝试中成功")
+            logger.info(f"[{req_id}] ✅ UI state applied successfully on attempt {attempt}")
             return True
 
         if attempt < max_retries:
-            logger.warning(f"[{req_id}] ⚠️ 第 {attempt} 次尝试失败，{retry_delay}秒后重试...")
+            logger.warning(f"[{req_id}] ⚠️ Attempt {attempt} failed; retrying in {retry_delay}s...")
             await asyncio.sleep(retry_delay)
         else:
-            logger.error(f"[{req_id}] ❌ UI状态设置在 {max_retries} 次尝试后仍然失败")
+            logger.error(f"[{req_id}] ❌ UI state failed after {max_retries} attempts")
 
     return False
 
 async def _verify_and_apply_ui_state(page: AsyncPage, req_id: str = "unknown") -> bool:
     """
-    验证并应用UI状态设置的完整流程
+    Full flow to verify and apply UI state settings
 
     Args:
-        page: Playwright页面对象
-        req_id: 请求ID用于日志
+        page: Playwright page instance
+        req_id: request ID for logging
 
     Returns:
-        bool: 操作是否成功
+        bool: whether operation succeeded
     """
     try:
-        logger.info(f"[{req_id}] 开始验证并应用UI状态设置...")
+        logger.info(f"[{req_id}] Starting verification and application of UI state settings...")
 
-        # 首先验证当前状态
+        # First verify current state
         state = await _verify_ui_state_settings(page, req_id)
 
-        logger.info(f"[{req_id}] 当前UI状态: exists={state['exists']}, isAdvancedOpen={state['isAdvancedOpen']}, areToolsOpen={state['areToolsOpen']}, needsUpdate={state['needsUpdate']}")
+        logger.info(f"[{req_id}] Current UI state: exists={state['exists']}, isAdvancedOpen={state['isAdvancedOpen']}, areToolsOpen={state['areToolsOpen']}, needsUpdate={state['needsUpdate']}")
 
         if state['needsUpdate']:
-            logger.info(f"[{req_id}] 检测到UI状态需要更新，正在应用强制设置...")
+            logger.info(f"[{req_id}] Detected UI state needs update; applying forced settings...")
             return await _force_ui_state_with_retry(page, req_id)
         else:
-            logger.info(f"[{req_id}] UI状态已正确设置，无需更新")
+            logger.info(f"[{req_id}] UI state already correct; no update needed")
             return True
 
     except Exception as e:
-        logger.error(f"[{req_id}] 验证并应用UI状态设置时发生错误: {e}")
+        logger.error(f"[{req_id}] Error verifying and applying UI state settings: {e}")
         return False
 
 async def switch_ai_studio_model(page: AsyncPage, model_id: str, req_id: str) -> bool:
-    """切换AI Studio模型"""
-    logger.info(f"[{req_id}] 开始切换模型到: {model_id}")
+    """Switch AI Studio model"""
+    logger.info(f"[{req_id}] Starting model switch to: {model_id}")
     original_prefs_str: Optional[str] = None
     original_prompt_model: Optional[str] = None
     new_chat_url = f"https://{AI_STUDIO_URL_PATTERN}prompts/new_chat"
@@ -206,51 +206,51 @@ async def switch_ai_studio_model(page: AsyncPage, model_id: str, req_id: str) ->
             try:
                 original_prefs_obj = json.loads(original_prefs_str)
                 original_prompt_model = original_prefs_obj.get("promptModel")
-                logger.info(f"[{req_id}] 切换前 localStorage.promptModel 为: {original_prompt_model or '未设置'}")
+                logger.info(f"[{req_id}] Before switch localStorage.promptModel: {original_prompt_model or 'not set'}")
             except json.JSONDecodeError:
-                logger.warning(f"[{req_id}] 无法解析原始的 aiStudioUserPreference JSON 字符串。")
+                logger.warning(f"[{req_id}] Unable to parse original aiStudioUserPreference JSON string.")
                 original_prefs_str = None
         
         current_prefs_for_modification = json.loads(original_prefs_str) if original_prefs_str else {}
         full_model_path = f"models/{model_id}"
         
         if current_prefs_for_modification.get("promptModel") == full_model_path:
-            logger.info(f"[{req_id}] 模型已经设置为 {model_id} (localStorage 中已是目标值)，无需切换")
+            logger.info(f"[{req_id}] Model already set to {model_id} (localStorage has target value); no switch needed")
             if page.url != new_chat_url:
-                 logger.info(f"[{req_id}] 当前 URL 不是 new_chat ({page.url})，导航到 {new_chat_url}")
+                 logger.info(f"[{req_id}] Current URL is not new_chat ({page.url}); navigating to {new_chat_url}")
                  await page.goto(new_chat_url, wait_until="domcontentloaded", timeout=30000)
                  await expect_async(page.locator(INPUT_SELECTOR)).to_be_visible(timeout=30000)
             return True
         
-        logger.info(f"[{req_id}] 从 {current_prefs_for_modification.get('promptModel', '未知')} 更新 localStorage.promptModel 为 {full_model_path}")
+        logger.info(f"[{req_id}] Updating localStorage.promptModel from {current_prefs_for_modification.get('promptModel', 'unknown')} to {full_model_path}")
         current_prefs_for_modification["promptModel"] = full_model_path
         await page.evaluate("(prefsStr) => localStorage.setItem('aiStudioUserPreference', prefsStr)", json.dumps(current_prefs_for_modification))
         
-        # 使用新的强制设置功能
-        logger.info(f"[{req_id}] 应用强制UI状态设置...")
+        # Use new forced UI state function
+        logger.info(f"[{req_id}] Applying forced UI state settings...")
         ui_state_success = await _verify_and_apply_ui_state(page, req_id)
         if not ui_state_success:
-            logger.warning(f"[{req_id}] UI状态设置失败，但继续执行模型切换流程")
+            logger.warning(f"[{req_id}] UI state settings failed; proceeding with model switch anyway")
 
-        # 为了保持兼容性，也更新当前的prefs对象
+        # For compatibility, also update current prefs object
         current_prefs_for_modification["isAdvancedOpen"] = True
         current_prefs_for_modification["areToolsOpen"] = True
         await page.evaluate("(prefsStr) => localStorage.setItem('aiStudioUserPreference', prefsStr)", json.dumps(current_prefs_for_modification))
 
-        logger.info(f"[{req_id}] localStorage 已更新，导航到 '{new_chat_url}' 应用新模型...")
+        logger.info(f"[{req_id}] localStorage updated; navigating to '{new_chat_url}' to apply new model...")
         await page.goto(new_chat_url, wait_until="domcontentloaded", timeout=30000)
 
         input_field = page.locator(INPUT_SELECTOR)
         await expect_async(input_field).to_be_visible(timeout=30000)
-        logger.info(f"[{req_id}] 页面已导航到新聊天并加载完成，输入框可见")
+        logger.info(f"[{req_id}] Navigated to new chat and page loaded; input field is visible")
 
-        # 页面加载后再次验证UI状态设置
-        logger.info(f"[{req_id}] 页面加载完成，验证UI状态设置...")
+        # After load, verify UI state settings again
+        logger.info(f"[{req_id}] Page load complete; verifying UI state settings...")
         final_ui_state_success = await _verify_and_apply_ui_state(page, req_id)
         if final_ui_state_success:
-            logger.info(f"[{req_id}] ✅ UI状态最终验证成功")
+            logger.info(f"[{req_id}] ✅ UI state final verification successful")
         else:
-            logger.warning(f"[{req_id}] ⚠️ UI状态最终验证失败，但继续执行模型切换流程")
+            logger.warning(f"[{req_id}] ⚠️ UI state final verification failed; continuing")
         
         final_prefs_str = await page.evaluate("() => localStorage.getItem('aiStudioUserPreference')")
         final_prompt_model_in_storage: Optional[str] = None
@@ -259,16 +259,16 @@ async def switch_ai_studio_model(page: AsyncPage, model_id: str, req_id: str) ->
                 final_prefs_obj = json.loads(final_prefs_str)
                 final_prompt_model_in_storage = final_prefs_obj.get("promptModel")
             except json.JSONDecodeError:
-                logger.warning(f"[{req_id}] 无法解析刷新后的 aiStudioUserPreference JSON 字符串。")
+                logger.warning(f"[{req_id}] Unable to parse refreshed aiStudioUserPreference JSON string.")
         
         if final_prompt_model_in_storage == full_model_path:
-            logger.info(f"[{req_id}] ✅ AI Studio localStorage 中模型已成功设置为: {full_model_path}")
+            logger.info(f"[{req_id}] ✅ AI Studio localStorage model successfully set to: {full_model_path}")
             
             page_display_match = False
             expected_display_name_for_target_id = None
-            actual_displayed_model_name_on_page = "无法读取"
+            actual_displayed_model_name_on_page = "unreadable"
             
-            # 获取parsed_model_list
+            # Get parsed_model_list
             import server
             parsed_model_list = getattr(server, 'parsed_model_list', [])
             
@@ -287,18 +287,18 @@ async def switch_ai_studio_model(page: AsyncPage, model_id: str, req_id: str) ->
 
                 if actual_displayed_model_id_on_page == target_model_id:
                     page_display_match = True
-                    logger.info(f"[{req_id}] ✅ 页面显示模型ID ('{actual_displayed_model_id_on_page}') 与期望ID ('{target_model_id}') 一致。")
+                    logger.info(f"[{req_id}] ✅ Page displayed model ID ('{actual_displayed_model_id_on_page}') matches expected ID ('{target_model_id}')")
                 else:
                     page_display_match = False
-                    logger.error(f"[{req_id}] ❌ 页面显示模型ID ('{actual_displayed_model_id_on_page}') 与期望ID ('{target_model_id}') 不一致。")
+                    logger.error(f"[{req_id}] ❌ Page displayed model ID ('{actual_displayed_model_id_on_page}') does not match expected ID ('{target_model_id}')")
             
             except Exception as e_disp:
-                page_display_match = False # 读取失败则认为不匹配
-                logger.warning(f"[{req_id}] 读取页面显示的当前模型ID时出错: {e_disp}。将无法验证页面显示。")
+                page_display_match = False # Treat read failure as mismatch
+                logger.warning(f"[{req_id}] Error reading page displayed current model ID: {e_disp}. Cannot verify page display.")
 
             if page_display_match:
                 try:
-                    logger.info(f"[{req_id}] 模型切换成功，重新启用 '临时聊天' 模式...")
+                    logger.info(f"[{req_id}] Model switch successful; re-enabling 'Temporary chat' mode...")
                     incognito_button_locator = page.locator('button[aria-label="Temporary chat toggle"]')
                     
                     await incognito_button_locator.wait_for(state="visible", timeout=5000)
@@ -306,57 +306,57 @@ async def switch_ai_studio_model(page: AsyncPage, model_id: str, req_id: str) ->
                     button_classes = await incognito_button_locator.get_attribute("class")
                     
                     if button_classes and 'ms-button-active' in button_classes:
-                        logger.info(f"[{req_id}] '临时聊天' 模式已处于激活状态。")
+                        logger.info(f"[{req_id}] 'Temporary chat' mode already active.")
                     else:
-                        logger.info(f"[{req_id}] '临时聊天' 模式未激活，正在点击以开启...")
+                        logger.info(f"[{req_id}] 'Temporary chat' mode inactive; clicking to enable...")
                         await incognito_button_locator.click(timeout=3000)
                         await asyncio.sleep(0.5)
                         
                         updated_classes = await incognito_button_locator.get_attribute("class")
                         if updated_classes and 'ms-button-active' in updated_classes:
-                             logger.info(f"[{req_id}] ✅ '临时聊天' 模式已成功重新启用。")
+                             logger.info(f"[{req_id}] ✅ 'Temporary chat' mode re-enabled successfully.")
                         else:
-                             logger.warning(f"[{req_id}] ⚠️ 点击后 '临时聊天' 模式状态验证失败，可能未成功重新开启。")
+                             logger.warning(f"[{req_id}] ⚠️ After click, 'Temporary chat' mode state verification failed; may not have enabled.")
                 
                 except Exception as e:
-                    logger.warning(f"[{req_id}] ⚠️ 模型切换后重新启用 '临时聊天' 模式失败: {e}")
+                    logger.warning(f"[{req_id}] ⚠️ Failed to re-enable 'Temporary chat' mode after model switch: {e}")
                 return True
             else:
-                logger.error(f"[{req_id}] ❌ 模型切换失败，因为页面显示的模型与期望不符 (即使localStorage可能已更改)。")
+                logger.error(f"[{req_id}] ❌ Model switch failed because page displayed model does not match expected (even if localStorage changed).")
         else:
-            logger.error(f"[{req_id}] ❌ AI Studio 未接受模型更改 (localStorage)。期望='{full_model_path}', 实际='{final_prompt_model_in_storage or '未设置或无效'}'.")
+            logger.error(f"[{req_id}] ❌ AI Studio did not accept model change (localStorage). Expected='{full_model_path}', actual='{final_prompt_model_in_storage or 'not set or invalid'}'.")
         
-        logger.info(f"[{req_id}] 模型切换失败。尝试恢复到页面当前实际显示的模型的状态...")
-        current_displayed_name_for_revert_raw = "无法读取"
-        current_displayed_name_for_revert_stripped = "无法读取"
+        logger.info(f"[{req_id}] Model switch failed. Attempting to restore to the model currently displayed on page...")
+        current_displayed_name_for_revert_raw = "unreadable"
+        current_displayed_name_for_revert_stripped = "unreadable"
         
         try:
             model_name_locator_revert = page.locator('[data-test-id="model-name"]')
             current_displayed_name_for_revert_raw = await model_name_locator_revert.first.inner_text(timeout=5000)
             current_displayed_name_for_revert_stripped = current_displayed_name_for_revert_raw.strip()
-            logger.info(f"[{req_id}] 恢复：页面当前显示的模型名称 (原始: '{current_displayed_name_for_revert_raw}', 清理后: '{current_displayed_name_for_revert_stripped}')")
+            logger.info(f"[{req_id}] Restore: page currently displays model name (raw: '{current_displayed_name_for_revert_raw}', stripped: '{current_displayed_name_for_revert_stripped}')")
         except Exception as e_read_disp_revert:
-            logger.warning(f"[{req_id}] 恢复：读取页面当前显示模型名称失败: {e_read_disp_revert}。将尝试回退到原始localStorage。")
+            logger.warning(f"[{req_id}] Restore: failed to read page displayed model name: {e_read_disp_revert}. Will try to revert to original localStorage.")
             if original_prefs_str:
-                logger.info(f"[{req_id}] 恢复：由于无法读取当前页面显示，尝试将 localStorage 恢复到原始状态: '{original_prompt_model or '未设置'}'")
+                logger.info(f"[{req_id}] Restore: unable to read current page display; attempting to restore localStorage to original: '{original_prompt_model or 'not set'}'")
                 await page.evaluate("(origPrefs) => localStorage.setItem('aiStudioUserPreference', origPrefs)", original_prefs_str)
-                logger.info(f"[{req_id}] 恢复：导航到 '{new_chat_url}' 以应用恢复的原始 localStorage 设置...")
+                logger.info(f"[{req_id}] Restore: navigating to '{new_chat_url}' to apply restored original localStorage...")
                 await page.goto(new_chat_url, wait_until="domcontentloaded", timeout=20000)
                 await expect_async(page.locator(INPUT_SELECTOR)).to_be_visible(timeout=20000)
-                logger.info(f"[{req_id}] 恢复：页面已导航到新聊天并加载，已尝试应用原始 localStorage。")
+                logger.info(f"[{req_id}] Restore: navigated to new chat and loaded; attempted to apply original localStorage.")
             else:
-                logger.warning(f"[{req_id}] 恢复：无有效的原始 localStorage 状态可恢复，也无法读取当前页面显示。")
+                logger.warning(f"[{req_id}] Restore: no valid original localStorage available and cannot read current page display.")
             return False
         
         model_id_to_revert_to = None
-        if current_displayed_name_for_revert_stripped != "无法读取":
+        if current_displayed_name_for_revert_stripped != "unreadable":
             model_id_to_revert_to = current_displayed_name_for_revert_stripped
-            logger.info(f"[{req_id}] 恢复：页面当前显示的ID是 '{model_id_to_revert_to}'，将直接用于恢复。")
+            logger.info(f"[{req_id}] Restore: page currently displays ID '{model_id_to_revert_to}'; using it for revert.")
         else:
-            if current_displayed_name_for_revert_stripped == "无法读取":
-                 logger.warning(f"[{req_id}] 恢复：因无法读取页面显示名称，故不能从 parsed_model_list 转换ID。")
+            if current_displayed_name_for_revert_stripped == "unreadable":
+                 logger.warning(f"[{req_id}] Restore: cannot convert display name to ID due to unreadable page display.")
             else:
-                 logger.warning(f"[{req_id}] 恢复：parsed_model_list 为空，无法从显示名称 '{current_displayed_name_for_revert_stripped}' 转换模型ID。")
+                 logger.warning(f"[{req_id}] Restore: parsed_model_list is empty; cannot convert display name '{current_displayed_name_for_revert_stripped}' to model ID.")
         
         if model_id_to_revert_to:
             base_prefs_for_final_revert = {}
@@ -367,66 +367,66 @@ async def switch_ai_studio_model(page: AsyncPage, model_id: str, req_id: str) ->
                 elif original_prefs_str:
                     base_prefs_for_final_revert = json.loads(original_prefs_str)
             except json.JSONDecodeError:
-                logger.warning(f"[{req_id}] 恢复：解析现有 localStorage 以构建恢复偏好失败。")
+                logger.warning(f"[{req_id}] Restore: failed to parse existing localStorage to build revert preferences.")
             
             path_to_revert_to = f"models/{model_id_to_revert_to}"
             base_prefs_for_final_revert["promptModel"] = path_to_revert_to
-            # 使用新的强制设置功能
-            logger.info(f"[{req_id}] 恢复：应用强制UI状态设置...")
+            # Use new forced settings
+            logger.info(f"[{req_id}] Restore: applying forced UI state settings...")
             ui_state_success = await _verify_and_apply_ui_state(page, req_id)
             if not ui_state_success:
-                logger.warning(f"[{req_id}] 恢复：UI状态设置失败，但继续执行恢复流程")
+                logger.warning(f"[{req_id}] Restore: UI state settings failed; continuing with revert")
 
-            # 为了保持兼容性，也更新当前的prefs对象
+            # For compatibility, also update current prefs object
             base_prefs_for_final_revert["isAdvancedOpen"] = True
             base_prefs_for_final_revert["areToolsOpen"] = True
-            logger.info(f"[{req_id}] 恢复：准备将 localStorage.promptModel 设置回页面实际显示的模型的路径: '{path_to_revert_to}'，并强制设置配置选项")
+            logger.info(f"[{req_id}] Restore: setting localStorage.promptModel to page displayed model path: '{path_to_revert_to}', and forcing settings")
             await page.evaluate("(prefsStr) => localStorage.setItem('aiStudioUserPreference', prefsStr)", json.dumps(base_prefs_for_final_revert))
-            logger.info(f"[{req_id}] 恢复：导航到 '{new_chat_url}' 以应用恢复到 '{model_id_to_revert_to}' 的 localStorage 设置...")
+            logger.info(f"[{req_id}] Restore: navigating to '{new_chat_url}' to apply revert to '{model_id_to_revert_to}'...")
             await page.goto(new_chat_url, wait_until="domcontentloaded", timeout=30000)
             await expect_async(page.locator(INPUT_SELECTOR)).to_be_visible(timeout=30000)
 
-            # 恢复后再次验证UI状态
-            logger.info(f"[{req_id}] 恢复：页面加载完成，验证UI状态设置...")
+            # Verify UI state after revert
+            logger.info(f"[{req_id}] Restore: page load complete; verifying UI state settings...")
             final_ui_state_success = await _verify_and_apply_ui_state(page, req_id)
             if final_ui_state_success:
-                logger.info(f"[{req_id}] ✅ 恢复：UI状态最终验证成功")
+                logger.info(f"[{req_id}] ✅ Restore: UI state final verification successful")
             else:
-                logger.warning(f"[{req_id}] ⚠️ 恢复：UI状态最终验证失败")
+                logger.warning(f"[{req_id}] ⚠️ Restore: UI state final verification failed")
 
-            logger.info(f"[{req_id}] 恢复：页面已导航到新聊天并加载。localStorage 应已设置为反映模型 '{model_id_to_revert_to}'。")
+            logger.info(f"[{req_id}] Restore: navigated to new chat and loaded. localStorage should reflect model '{model_id_to_revert_to}'.")
         else:
-            logger.error(f"[{req_id}] 恢复：无法将模型恢复到页面显示的状态，因为未能从显示名称 '{current_displayed_name_for_revert_stripped}' 确定有效模型ID。")
+            logger.error(f"[{req_id}] Restore: cannot revert model to page display state because a valid model ID could not be determined from display name '{current_displayed_name_for_revert_stripped}'.")
             if original_prefs_str:
-                logger.warning(f"[{req_id}] 恢复：作为最终后备，尝试恢复到原始 localStorage: '{original_prompt_model or '未设置'}'")
+                logger.warning(f"[{req_id}] Restore: as final fallback, attempting to restore original localStorage: '{original_prompt_model or 'not set'}'")
                 await page.evaluate("(origPrefs) => localStorage.setItem('aiStudioUserPreference', origPrefs)", original_prefs_str)
-                logger.info(f"[{req_id}] 恢复：导航到 '{new_chat_url}' 以应用最终后备的原始 localStorage。")
+                logger.info(f"[{req_id}] Restore: navigating to '{new_chat_url}' to apply final fallback original localStorage.")
                 await page.goto(new_chat_url, wait_until="domcontentloaded", timeout=20000)
                 await expect_async(page.locator(INPUT_SELECTOR)).to_be_visible(timeout=20000)
-                logger.info(f"[{req_id}] 恢复：页面已导航到新聊天并加载，已应用最终后备的原始 localStorage。")
+                logger.info(f"[{req_id}] Restore: navigated to new chat and loaded; applied final fallback original localStorage.")
             else:
-                logger.warning(f"[{req_id}] 恢复：无有效的原始 localStorage 状态可作为最终后备。")
+                logger.warning(f"[{req_id}] Restore: no valid original localStorage available as final fallback.")
         
         return False
         
     except Exception as e:
-        logger.exception(f"[{req_id}] ❌ 切换模型过程中发生严重错误")
-        # 导入save_error_snapshot函数
+        logger.exception(f"[{req_id}] ❌ Critical error during model switch")
+        # Import save_error_snapshot
         from .operations import save_error_snapshot
         await save_error_snapshot(f"model_switch_error_{req_id}")
         try:
             if original_prefs_str:
-                logger.info(f"[{req_id}] 发生异常，尝试恢复 localStorage 至: {original_prompt_model or '未设置'}")
+                logger.info(f"[{req_id}] Exception occurred; attempting to restore localStorage to: {original_prompt_model or 'not set'}")
                 await page.evaluate("(origPrefs) => localStorage.setItem('aiStudioUserPreference', origPrefs)", original_prefs_str)
-                logger.info(f"[{req_id}] 异常恢复：导航到 '{new_chat_url}' 以应用恢复的 localStorage。")
+                logger.info(f"[{req_id}] Exception recovery: navigating to '{new_chat_url}' to apply restored localStorage.")
                 await page.goto(new_chat_url, wait_until="domcontentloaded", timeout=15000)
                 await expect_async(page.locator(INPUT_SELECTOR)).to_be_visible(timeout=15000)
         except Exception as recovery_err:
-            logger.error(f"[{req_id}] 异常后恢复 localStorage 失败: {recovery_err}")
+            logger.error(f"[{req_id}] Failed to restore localStorage after exception: {recovery_err}")
         return False
 
 def load_excluded_models(filename: str):
-    """加载排除的模型列表"""
+    """Load excluded model list"""
     import server
     excluded_model_ids = getattr(server, 'excluded_model_ids', set())
     
@@ -438,22 +438,22 @@ def load_excluded_models(filename: str):
             if loaded_ids:
                 excluded_model_ids.update(loaded_ids)
                 server.excluded_model_ids = excluded_model_ids
-                logger.info(f"✅ 从 '{filename}' 加载了 {len(loaded_ids)} 个模型到排除列表: {excluded_model_ids}")
+                logger.info(f"✅ Loaded {len(loaded_ids)} models from '{filename}' into exclusion list: {excluded_model_ids}")
             else:
-                logger.info(f"'{filename}' 文件为空或不包含有效的模型 ID，排除列表未更改。")
+                logger.info(f"'{filename}' is empty or contains no valid model IDs; exclusion list unchanged.")
         else:
-            logger.info(f"模型排除列表文件 '{filename}' 未找到，排除列表为空。")
+            logger.info(f"Exclusion list file '{filename}' not found; exclusion list is empty.")
     except Exception as e:
-        logger.error(f"❌ 从 '{filename}' 加载排除模型列表时出错: {e}", exc_info=True)
+        logger.error(f"❌ Error loading excluded model list from '{filename}': {e}", exc_info=True)
 
 async def _handle_initial_model_state_and_storage(page: AsyncPage):
-    """处理初始模型状态和存储"""
+    """Handle initial model state and storage"""
     import server
     current_ai_studio_model_id = getattr(server, 'current_ai_studio_model_id', None)
     parsed_model_list = getattr(server, 'parsed_model_list', [])
     model_list_fetch_event = getattr(server, 'model_list_fetch_event', None)
     
-    logger.info("--- (新) 处理初始模型状态, localStorage 和 isAdvancedOpen ---")
+    logger.info("--- (New) Handle initial model state, localStorage, and isAdvancedOpen ---")
     needs_reload_and_storage_update = False
     reason_for_reload = ""
     
@@ -461,10 +461,10 @@ async def _handle_initial_model_state_and_storage(page: AsyncPage):
         initial_prefs_str = await page.evaluate("() => localStorage.getItem('aiStudioUserPreference')")
         if not initial_prefs_str:
             needs_reload_and_storage_update = True
-            reason_for_reload = "localStorage.aiStudioUserPreference 未找到。"
-            logger.info(f"   判定需要刷新和存储更新: {reason_for_reload}")
+            reason_for_reload = "localStorage.aiStudioUserPreference not found."
+            logger.info(f"   Determined need to reload and update storage: {reason_for_reload}")
         else:
-            logger.info("   localStorage 中找到 'aiStudioUserPreference'。正在解析...")
+            logger.info("   Found 'aiStudioUserPreference' in localStorage. Parsing...")
             try:
                 pref_obj = json.loads(initial_prefs_str)
                 prompt_model_path = pref_obj.get("promptModel")
@@ -473,131 +473,131 @@ async def _handle_initial_model_state_and_storage(page: AsyncPage):
                 
                 if not is_prompt_model_valid:
                     needs_reload_and_storage_update = True
-                    reason_for_reload = "localStorage.promptModel 无效或未设置。"
-                    logger.info(f"   判定需要刷新和存储更新: {reason_for_reload}")
+                    reason_for_reload = "localStorage.promptModel invalid or not set."
+                    logger.info(f"   Determined need to reload and update storage: {reason_for_reload}")
                 else:
-                    # 使用新的UI状态验证功能
+                    # Use new UI state verification functionality
                     ui_state = await _verify_ui_state_settings(page, "initial")
                     if ui_state['needsUpdate']:
                         needs_reload_and_storage_update = True
-                        reason_for_reload = f"UI状态需要更新: isAdvancedOpen={ui_state['isAdvancedOpen']}, areToolsOpen={ui_state['areToolsOpen']} (期望: True)"
-                        logger.info(f"   判定需要刷新和存储更新: {reason_for_reload}")
+                        reason_for_reload = f"UI state needs update: isAdvancedOpen={ui_state['isAdvancedOpen']}, areToolsOpen={ui_state['areToolsOpen']} (expected: True)"
+                        logger.info(f"   Determined need to reload and update storage: {reason_for_reload}")
                     else:
                         server.current_ai_studio_model_id = prompt_model_path.split('/')[-1]
-                        logger.info(f"   ✅ localStorage 有效且UI状态正确。初始模型 ID 从 localStorage 设置为: {server.current_ai_studio_model_id}")
+                        logger.info(f"   ✅ localStorage valid and UI state correct. Initial model ID set from localStorage: {server.current_ai_studio_model_id}")
             except json.JSONDecodeError:
                 needs_reload_and_storage_update = True
-                reason_for_reload = "解析 localStorage.aiStudioUserPreference JSON 失败。"
-                logger.error(f"   判定需要刷新和存储更新: {reason_for_reload}")
+                reason_for_reload = "Failed to parse localStorage.aiStudioUserPreference JSON."
+                logger.error(f"   Determined need to reload and update storage: {reason_for_reload}")
         
         if needs_reload_and_storage_update:
-            logger.info(f"   执行刷新和存储更新流程，原因: {reason_for_reload}")
-            logger.info("   步骤 1: 调用 _set_model_from_page_display(set_storage=True) 更新 localStorage 和全局模型 ID...")
+            logger.info(f"   Executing reload and storage update flow due to: {reason_for_reload}")
+            logger.info("   Step 1: call _set_model_from_page_display(set_storage=True) to update localStorage and global model ID...")
             await _set_model_from_page_display(page, set_storage=True)
             
             current_page_url = page.url
-            logger.info(f"   步骤 2: 重新加载页面 ({current_page_url}) 以应用 isAdvancedOpen=true...")
+            logger.info(f"   Step 2: reload page ({current_page_url}) to apply isAdvancedOpen=true...")
             max_retries = 3
             for attempt in range(max_retries):
                 try:
-                    logger.info(f"   尝试重新加载页面 (第 {attempt + 1}/{max_retries} 次): {current_page_url}")
+                    logger.info(f"   Attempt to reload page ({attempt + 1}/{max_retries}): {current_page_url}")
                     await page.goto(current_page_url, wait_until="domcontentloaded", timeout=40000)
                     await expect_async(page.locator(INPUT_SELECTOR)).to_be_visible(timeout=30000)
-                    logger.info(f"   ✅ 页面已成功重新加载到: {page.url}")
+                    logger.info(f"   ✅ Page successfully reloaded to: {page.url}")
 
-                    # 页面重新加载后验证UI状态
-                    logger.info(f"   页面重新加载完成，验证UI状态设置...")
+                    # Verify UI state after reload
+                    logger.info(f"   Page reload complete; verifying UI state settings...")
                     reload_ui_state_success = await _verify_and_apply_ui_state(page, "reload")
                     if reload_ui_state_success:
-                        logger.info(f"   ✅ 重新加载后UI状态验证成功")
+                        logger.info(f"   ✅ UI state verification after reload successful")
                     else:
-                        logger.warning(f"   ⚠️ 重新加载后UI状态验证失败")
+                        logger.warning(f"   ⚠️ UI state verification after reload failed")
 
-                    break  # 成功则跳出循环
+                    break  # success
                 except Exception as reload_err:
-                    logger.warning(f"   ⚠️ 页面重新加载尝试 {attempt + 1}/{max_retries} 失败: {reload_err}")
+                    logger.warning(f"   ⚠️ Page reload attempt {attempt + 1}/{max_retries} failed: {reload_err}")
                     if attempt < max_retries - 1:
-                        logger.info(f"   将在5秒后重试...")
+                        logger.info(f"   Will retry in 5s...")
                         await asyncio.sleep(5)
                     else:
-                        logger.error(f"   ❌ 页面重新加载在 {max_retries} 次尝试后最终失败: {reload_err}. 后续模型状态可能不准确。", exc_info=True)
+                        logger.error(f"   ❌ Page reload ultimately failed after {max_retries} attempts: {reload_err}. Subsequent model state may be inaccurate.", exc_info=True)
                         from .operations import save_error_snapshot
                         await save_error_snapshot(f"initial_storage_reload_fail_attempt_{attempt+1}")
             
-            logger.info("   步骤 3: 重新加载后，再次调用 _set_model_from_page_display(set_storage=False) 以同步全局模型 ID...")
+            logger.info("   Step 3: after reload, call _set_model_from_page_display(set_storage=False) again to sync global model ID...")
             await _set_model_from_page_display(page, set_storage=False)
-            logger.info(f"   ✅ 刷新和存储更新流程完成。最终全局模型 ID: {server.current_ai_studio_model_id}")
+            logger.info(f"   ✅ Reload and storage update flow completed. Final global model ID: {server.current_ai_studio_model_id}")
         else:
-            logger.info("   localStorage 状态良好 (isAdvancedOpen=true, promptModel有效)，无需刷新页面。")
+            logger.info("   localStorage state is good (isAdvancedOpen=true, promptModel valid); no page reload needed.")
     except Exception as e:
-        logger.error(f"❌ (新) 处理初始模型状态和 localStorage 时发生严重错误: {e}", exc_info=True)
+        logger.error(f"❌ (New) Critical error handling initial model state and localStorage: {e}", exc_info=True)
         try:
-            logger.warning("   由于发生错误，尝试回退仅从页面显示设置全局模型 ID (不写入localStorage)...")
+            logger.warning("   Due to error, attempting fallback to set global model ID from page display only (no localStorage write)...")
             await _set_model_from_page_display(page, set_storage=False)
         except Exception as fallback_err:
-            logger.error(f"   回退设置模型ID也失败: {fallback_err}")
+            logger.error(f"   Fallback setting model ID also failed: {fallback_err}")
 
 async def _set_model_from_page_display(page: AsyncPage, set_storage: bool = False):
-    """从页面显示设置模型"""
+    """Set model from page display"""
     import server
     current_ai_studio_model_id = getattr(server, 'current_ai_studio_model_id', None)
     parsed_model_list = getattr(server, 'parsed_model_list', [])
     model_list_fetch_event = getattr(server, 'model_list_fetch_event', None)
     
     try:
-        logger.info("   尝试从页面显示元素读取当前模型名称...")
+        logger.info("   Attempting to read current model name from page display element...")
         model_name_locator = page.locator('[data-test-id="model-name"]')
         displayed_model_name_from_page_raw = await model_name_locator.first.inner_text(timeout=7000)
         displayed_model_name = displayed_model_name_from_page_raw.strip()
-        logger.info(f"   页面当前显示模型名称 (原始: '{displayed_model_name_from_page_raw}', 清理后: '{displayed_model_name}')")
+        logger.info(f"   Page displayed model name (raw: '{displayed_model_name_from_page_raw}', stripped: '{displayed_model_name}')")
         
         found_model_id_from_display = None
         if model_list_fetch_event and not model_list_fetch_event.is_set():
-            logger.info("   等待模型列表数据 (最多5秒) 以便转换显示名称...")
+            logger.info("   Waiting for model list data (up to 5s) to convert display name if needed...")
             try: 
                 await asyncio.wait_for(model_list_fetch_event.wait(), timeout=5.0)
             except asyncio.TimeoutError: 
-                logger.warning("   等待模型列表超时，可能无法准确转换显示名称为ID。")
+                logger.warning("   Waiting for model list timed out; may not accurately convert display name to ID.")
         
         found_model_id_from_display = displayed_model_name
-        logger.info(f"   页面显示的直接是模型ID: '{found_model_id_from_display}'")
+        logger.info(f"   Page display shows a model ID directly: '{found_model_id_from_display}'")
         
         new_model_value = found_model_id_from_display
         if server.current_ai_studio_model_id != new_model_value:
             server.current_ai_studio_model_id = new_model_value
-            logger.info(f"   全局 current_ai_studio_model_id 已更新为: {server.current_ai_studio_model_id}")
+            logger.info(f"   Global current_ai_studio_model_id updated to: {server.current_ai_studio_model_id}")
         else:
-            logger.info(f"   全局 current_ai_studio_model_id ('{server.current_ai_studio_model_id}') 与从页面获取的值一致，未更改。")
+            logger.info(f"   Global current_ai_studio_model_id ('{server.current_ai_studio_model_id}') matches page value; unchanged.")
         
         if set_storage:
-            logger.info(f"   准备为页面状态设置 localStorage (确保 isAdvancedOpen=true)...")
+            logger.info(f"   Preparing to set localStorage for page state (ensure isAdvancedOpen=true)...")
             existing_prefs_for_update_str = await page.evaluate("() => localStorage.getItem('aiStudioUserPreference')")
             prefs_to_set = {}
             if existing_prefs_for_update_str:
                 try:
                     prefs_to_set = json.loads(existing_prefs_for_update_str)
                 except json.JSONDecodeError:
-                    logger.warning("   解析现有 localStorage.aiStudioUserPreference 失败，将创建新的偏好设置。")
+                    logger.warning("   Failed to parse existing localStorage.aiStudioUserPreference; will create new preferences.")
             
-            # 使用新的强制设置功能
-            logger.info(f"     应用强制UI状态设置...")
+            # Use new forced settings
+            logger.info(f"     Applying forced UI state settings...")
             ui_state_success = await _verify_and_apply_ui_state(page, "set_model")
             if not ui_state_success:
-                logger.warning(f"     UI状态设置失败，使用传统方法")
+                logger.warning(f"     UI state settings failed; using traditional method")
                 prefs_to_set["isAdvancedOpen"] = True
                 prefs_to_set["areToolsOpen"] = True
             else:
-                # 确保prefs_to_set也包含正确的设置
+                # Ensure prefs_to_set also includes correct settings
                 prefs_to_set["isAdvancedOpen"] = True
                 prefs_to_set["areToolsOpen"] = True
-            logger.info(f"     强制 isAdvancedOpen: true, areToolsOpen: true")
+            logger.info(f"     Forced isAdvancedOpen: true, areToolsOpen: true")
             
             if found_model_id_from_display:
                 new_prompt_model_path = f"models/{found_model_id_from_display}"
                 prefs_to_set["promptModel"] = new_prompt_model_path
-                logger.info(f"     设置 promptModel 为: {new_prompt_model_path} (基于找到的ID)")
+                logger.info(f"     Set promptModel to: {new_prompt_model_path} (from page display)")
             elif "promptModel" not in prefs_to_set:
-                logger.warning(f"     无法从页面显示 '{displayed_model_name}' 找到模型ID，且 localStorage 中无现有 promptModel。promptModel 将不会被主动设置以避免潜在问题。")
+                logger.warning(f"     Could not determine model ID from page display '{displayed_model_name}', and localStorage has no existing promptModel. Will not set promptModel to avoid issues.")
             
             default_keys_if_missing = {
                 "bidiModel": "models/gemini-1.0-pro-001",
@@ -617,6 +617,6 @@ async def _set_model_from_page_display(page: AsyncPage, set_storage: bool = Fals
                     prefs_to_set[key] = val_default
             
             await page.evaluate("(prefsStr) => localStorage.setItem('aiStudioUserPreference', prefsStr)", json.dumps(prefs_to_set))
-            logger.info(f"   ✅ localStorage.aiStudioUserPreference 已更新。isAdvancedOpen: {prefs_to_set.get('isAdvancedOpen')}, areToolsOpen: {prefs_to_set.get('areToolsOpen')} (期望: True), promptModel: '{prefs_to_set.get('promptModel', '未设置/保留原样')}'。")
+            logger.info(f"   ✅ localStorage.aiStudioUserPreference updated. isAdvancedOpen: {prefs_to_set.get('isAdvancedOpen')}, areToolsOpen: {prefs_to_set.get('areToolsOpen')} (expected: True), promptModel: '{prefs_to_set.get('promptModel', 'not set/preserved')}'.")
     except Exception as e_set_disp:
-        logger.error(f"   尝试从页面显示设置模型时出错: {e_set_disp}", exc_info=True) 
+        logger.error(f"   Error setting model from page display: {e_set_disp}", exc_info=True) 
