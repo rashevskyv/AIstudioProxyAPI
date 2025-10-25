@@ -1898,7 +1898,7 @@ def kill_process_pid_admin(pid: int) -> bool:
     """使用管理员权限尝试终止进程。"""
     system = platform.system()
     success = False
-    logger.info(f"尝试以管理员权限终止进程 PID: {pid} (系统: {system})")
+    logger.info(f"Attempting to terminate PID {pid} with admin privileges (OS: {system})")
     try:
         if system == "Windows":
             # 在Windows上使用PowerShell以管理员权限运行taskkill
@@ -1906,58 +1906,58 @@ def kill_process_pid_admin(pid: int) -> bool:
             if ctypes.windll.shell32.IsUserAnAdmin() == 0:
                 # 如果当前不是管理员，则尝试用管理员权限启动新进程
                 # 准备 PowerShell 命令
-                logger.info(f"当前非管理员权限，使用PowerShell提升权限")
+                logger.info("Not running as admin; elevating via PowerShell")
                 ps_cmd = f"Start-Process -Verb RunAs taskkill -ArgumentList '/PID {pid} /F /T'"
-                logger.debug(f"执行PowerShell命令: {ps_cmd}")
+                logger.debug(f"Executing PowerShell command: {ps_cmd}")
                 result = subprocess.run(["powershell", "-Command", ps_cmd],
                                      capture_output=True, text=True, creationflags=subprocess.CREATE_NO_WINDOW)
-                logger.info(f"PowerShell命令结果: 返回码={result.returncode}, 输出={result.stdout}, 错误={result.stderr}")
+                logger.info(f"PowerShell result: rc={result.returncode}, out={result.stdout}, err={result.stderr}")
                 success = result.returncode == 0
             else:
                 # 如果已经是管理员，则直接运行taskkill
-                logger.info(f"当前已是管理员权限，直接执行taskkill")
+                logger.info("Already running as admin; executing taskkill directly")
                 result = subprocess.run(["taskkill", "/PID", str(pid), "/F", "/T"],
                                      capture_output=True, text=True, creationflags=subprocess.CREATE_NO_WINDOW)
-                logger.info(f"Taskkill命令结果: 返回码={result.returncode}, 输出={result.stdout}, 错误={result.stderr}")
+                logger.info(f"Taskkill result: rc={result.returncode}, out={result.stdout}, err={result.stderr}")
                 success = result.returncode == 0
         elif system in ["Linux", "Darwin"]:  # Linux或macOS
             # 使用sudo尝试终止进程
-            logger.info(f"使用sudo在新终端中终止进程")
+            logger.info("Terminating process via sudo in a new terminal")
             cmd = ["sudo", "kill", "-9", str(pid)]
             # 对于GUI程序，我们需要让用户在终端输入密码，所以使用新终端窗口
             if system == "Darwin":  # macOS
-                logger.info(f"在macOS上使用AppleScript打开Terminal并执行sudo命令")
+                logger.info("Using AppleScript on macOS to open Terminal and execute sudo command")
                 applescript = f'tell application "Terminal" to do script "sudo kill -9 {pid}"'
                 result = subprocess.run(["osascript", "-e", applescript], capture_output=True, text=True)
-                logger.info(f"AppleScript结果: 返回码={result.returncode}, 输出={result.stdout}, 错误={result.stderr}")
+                logger.info(f"AppleScript result: rc={result.returncode}, out={result.stdout}, err={result.stderr}")
                 success = result.returncode == 0
             else:  # Linux
                 # 查找可用的终端模拟器
                 import shutil
-                logger.info(f"在Linux上查找可用的终端模拟器")
+                logger.info("Searching for available terminal emulator on Linux")
                 terminal_emulator = shutil.which("x-terminal-emulator") or shutil.which("gnome-terminal") or \
                                    shutil.which("konsole") or shutil.which("xfce4-terminal") or shutil.which("xterm")
                 if terminal_emulator:
-                    logger.info(f"使用终端模拟器: {terminal_emulator}")
+                    logger.info(f"Using terminal emulator: {terminal_emulator}")
                     if "gnome-terminal" in terminal_emulator:
-                        logger.info(f"针对gnome-terminal的特殊处理")
+                        logger.info("Special handling for gnome-terminal")
                         result = subprocess.run([terminal_emulator, "--", "sudo", "kill", "-9", str(pid)])
                     else:
-                        logger.info(f"使用通用终端启动命令")
+                        logger.info("Using generic terminal launch command")
                         result = subprocess.run([terminal_emulator, "-e", f"sudo kill -9 {pid}"])
-                    logger.info(f"终端命令结果: 返回码={result.returncode}")
+                    logger.info(f"Terminal command result: rc={result.returncode}")
                     success = result.returncode == 0
                 else:
                     # 如果找不到终端模拟器，尝试直接使用sudo
-                    logger.warning(f"未找到终端模拟器，尝试直接使用sudo (可能需要当前进程已有sudo权限)")
+                    logger.warning("No terminal emulator found; attempting direct sudo (may require existing sudo perms)")
                     result = subprocess.run(["sudo", "kill", "-9", str(pid)], capture_output=True, text=True)
-                    logger.info(f"直接sudo命令结果: 返回码={result.returncode}, 输出={result.stdout}, 错误={result.stderr}")
+                    logger.info(f"Direct sudo result: rc={result.returncode}, out={result.stdout}, err={result.stderr}")
                     success = result.returncode == 0
     except Exception as e:
-        logger.error(f"使用管理员权限终止PID {pid}时出错: {e}", exc_info=True)
+        logger.error(f"Error terminating PID {pid} with admin privileges: {e}", exc_info=True)
         success = False
 
-    logger.info(f"管理员权限终止进程 PID: {pid} 结果: {'成功' if success else '失败'}")
+    logger.info(f"Admin-privilege termination for PID {pid} result: {'Success' if success else 'Failure'}")
     return success
 
 def kill_custom_pid_gui():
