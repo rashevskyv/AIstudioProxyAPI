@@ -1,5 +1,5 @@
 # --- browser_utils/operations.py ---
-# 浏览器页面操作相关功能模块
+# Browser page operation utilities
 
 import asyncio
 import time
@@ -11,7 +11,7 @@ from typing import Optional, Any, List, Dict, Callable, Set
 
 from playwright.async_api import Page as AsyncPage, Locator, Error as PlaywrightAsyncError
 
-# 导入配置和模型
+# Config and models
 from config import (
     DEBUG_LOGS_ENABLED,
     MODELS_ENDPOINT_URL_CONTAINS,
@@ -31,7 +31,7 @@ from models import ClientDisconnectedError
 logger = logging.getLogger("AIStudioProxyServer")
 
 async def get_raw_text_content(response_element: Locator, previous_text: str, req_id: str) -> str:
-    """从响应元素获取原始文本内容"""
+    """Get raw text content from response element"""
     raw_text = previous_text
     try:
         await response_element.wait_for(state='attached', timeout=1000)
@@ -48,62 +48,47 @@ async def get_raw_text_content(response_element: Locator, previous_text: str, re
                 raw_text = await pre_element.inner_text(timeout=500)
             except PlaywrightAsyncError as pre_err:
                 if DEBUG_LOGS_ENABLED:
-                    logger.debug(f"[{req_id}] (获取原始文本) 获取 pre 元素内部文本失败: {pre_err}")
+                    logger.debug(f"[{req_id}] (GetRawText) Failed to get inner text from pre element: {pre_err}")
         else:
             try:
                 raw_text = await response_element.inner_text(timeout=500)
             except PlaywrightAsyncError as e_parent:
                 if DEBUG_LOGS_ENABLED:
-                    logger.debug(f"[{req_id}] (获取原始文本) 获取响应元素内部文本失败: {e_parent}")
+                    logger.debug(f"[{req_id}] (GetRawText) Failed to get inner text from response element: {e_parent}")
     except PlaywrightAsyncError as e_parent:
         if DEBUG_LOGS_ENABLED:
-            logger.debug(f"[{req_id}] (获取原始文本) 响应元素未准备好: {e_parent}")
+            logger.debug(f"[{req_id}] (GetRawText) Response element not ready: {e_parent}")
     except Exception as e_unexpected:
-        logger.warning(f"[{req_id}] (获取原始文本) 意外错误: {e_unexpected}")
+        logger.warning(f"[{req_id}] (GetRawText) Unexpected error: {e_unexpected}")
     
     if raw_text != previous_text:
         if DEBUG_LOGS_ENABLED:
             preview = raw_text[:100].replace('\n', '\\n')
-            logger.debug(f"[{req_id}] (获取原始文本) 文本已更新，长度: {len(raw_text)}，预览: '{preview}...'")
+            logger.debug(f"[{req_id}] (GetRawText) Text updated, length: {len(raw_text)}, preview: '{preview}...'")
     return raw_text
 
 def _parse_userscript_models(script_content: str):
-    """从油猴脚本中解析模型列表 - 使用JSON解析方式"""
+    """Parse model list from userscript via JSON-like conversion"""
     try:
-        # 查找脚本版本号
         version_pattern = r'const\s+SCRIPT_VERSION\s*=\s*[\'\"]([^\'\"]+)[\'\"]'
         version_match = re.search(version_pattern, script_content)
         script_version = version_match.group(1) if version_match else "v1.6"
 
-        # 查找 MODELS_TO_INJECT 数组的内容
         models_array_pattern = r'const\s+MODELS_TO_INJECT\s*=\s*(\[.*?\]);'
         models_match = re.search(models_array_pattern, script_content, re.DOTALL)
 
         if not models_match:
-            logger.warning("未找到 MODELS_TO_INJECT 数组")
+            logger.warning("MODELS_TO_INJECT array not found")
             return []
 
         models_js_code = models_match.group(1)
-
-        # 将JavaScript数组转换为JSON格式
-        # 1. 替换模板字符串中的变量
         models_js_code = models_js_code.replace('${SCRIPT_VERSION}', script_version)
-
-        # 2. 移除JavaScript注释
         models_js_code = re.sub(r'//.*?$', '', models_js_code, flags=re.MULTILINE)
-
-        # 3. 将JavaScript对象转换为JSON格式
-        # 移除尾随逗号
         models_js_code = re.sub(r',\s*([}\]])', r'\1', models_js_code)
-
-        # 替换单引号为双引号
         models_js_code = re.sub(r"(\w+):\s*'([^']*)'", r'"\1": "\2"', models_js_code)
-        # 替换反引号为双引号
         models_js_code = re.sub(r'(\w+):\s*`([^`]*)`', r'"\1": "\2"', models_js_code)
-        # 确保属性名用双引号
         models_js_code = re.sub(r'(\w+):', r'"\1":', models_js_code)
 
-        # 4. 解析JSON
         import json
         models_data = json.loads(models_js_code)
 
@@ -116,57 +101,45 @@ def _parse_userscript_models(script_content: str):
                     'description': model_obj.get('description', '')
                 })
 
-        logger.info(f"成功解析 {len(models)} 个模型从油猴脚本")
+        logger.info(f"Successfully parsed {len(models)} models from userscript")
         return models
 
     except Exception as e:
-        logger.error(f"解析油猴脚本模型列表失败: {e}")
+        logger.error(f"Failed parsing userscript model list: {e}")
         return []
 
 
 def _get_injected_models():
-    """从油猴脚本中获取注入的模型列表，转换为API格式"""
+    """Get injected models from userscript and convert to API format"""
     try:
-        # 直接读取环境变量，避免复杂的导入
         enable_injection = os.environ.get('ENABLE_SCRIPT_INJECTION', 'true').lower() in ('true', '1', 'yes')
-
         if not enable_injection:
             return []
 
-        # 获取脚本文件路径
         script_path = os.environ.get('USERSCRIPT_PATH', 'browser_utils/more_modles.js')
-
-        # 检查脚本文件是否存在
         if not os.path.exists(script_path):
-            # 脚本文件不存在，静默返回空列表
             return []
 
-        # 读取油猴脚本内容
         with open(script_path, 'r', encoding='utf-8') as f:
             script_content = f.read()
 
-        # 从脚本中解析模型列表
         models = _parse_userscript_models(script_content)
-
         if not models:
             return []
 
-        # 转换为API格式
         injected_models = []
         for model in models:
             model_name = model.get('name', '')
             if not model_name:
-                continue  # 跳过没有名称的模型
+                continue
 
             if model_name.startswith('models/'):
-                simple_id = model_name[7:]  # 移除 'models/' 前缀
+                simple_id = model_name[7:]
             else:
                 simple_id = model_name
 
             display_name = model.get('displayName', model.get('display_name', simple_id))
             description = model.get('description', f'Injected model: {simple_id}')
-
-            # 注意：不再清理显示名称，保留原始的emoji和版本信息
 
             model_entry = {
                 "id": simple_id,
@@ -180,20 +153,18 @@ def _get_injected_models():
                 "default_max_output_tokens": 65536,
                 "supported_max_output_tokens": 65536,
                 "default_top_p": 0.95,
-                "injected": True  # 标记为注入的模型
+                "injected": True
             }
             injected_models.append(model_entry)
 
         return injected_models
 
-    except Exception as e:
-        # 静默处理错误，不输出日志，返回空列表
+    except Exception:
         return []
 
 
 async def _handle_model_list_response(response: Any):
-    """处理模型列表响应"""
-    # 需要访问全局变量
+    """Handle model list response"""
     import server
     global_model_list_raw_json = getattr(server, 'global_model_list_raw_json', None)
     parsed_model_list = getattr(server, 'parsed_model_list', [])
@@ -201,14 +172,10 @@ async def _handle_model_list_response(response: Any):
     excluded_model_ids = getattr(server, 'excluded_model_ids', set())
     
     if MODELS_ENDPOINT_URL_CONTAINS in response.url and response.ok:
-        # Check whether we are in login flow
         launch_mode = os.environ.get('LAUNCH_MODE', 'debug')
         is_in_login_flow = launch_mode in ['debug'] and not getattr(server, 'is_page_ready', False)
 
-        if is_in_login_flow:
-            # During login, handle silently to avoid noise
-            pass
-        else:
+        if not is_in_login_flow:
             logger.info(f"Captured potential model list response from: {response.url} (status: {response.status})")
         try:
             data = await response.json()
@@ -240,7 +207,7 @@ async def _handle_model_list_response(response: Any):
                             logger.info(f"Model list array heuristically found under key '{key}'.")
                             break
                     if models_array_container is None:
-                        logger.warning("在字典响应中未能自动定位模型列表数组。")
+                        logger.warning("Could not automatically locate model list array in dict response.")
                         if model_list_fetch_event and not model_list_fetch_event.is_set(): 
                             model_list_fetch_event.set()
                         return
@@ -374,27 +341,21 @@ async def _handle_model_list_response(response: Any):
                         logger.debug(f"Skipping entry due to invalid model_id_path: {model_id_path_str} from entry {str(entry_in_container)[:100]}")
                 
                 if new_parsed_list:
-                    # 检查是否已经有通过网络拦截注入的模型
                     has_network_injected_models = False
                     if models_array_container:
                         for entry_in_container in models_array_container:
                             if isinstance(entry_in_container, list) and len(entry_in_container) > 10:
-                                # 检查是否有网络注入标记
                                 if "__NETWORK_INJECTED__" in entry_in_container:
                                     has_network_injected_models = True
                                     break
 
                     if has_network_injected_models and not is_in_login_flow:
-                        logger.info("检测到网络拦截已注入模型")
-
-                    # 注意：不再在后端添加注入模型
-                    # 因为如果前端没有通过网络拦截注入，说明前端页面上没有这些模型
-                    # 后端返回这些模型也无法实际使用，所以只依赖网络拦截注入
+                        logger.info("Detected network-injected models")
 
                     server.parsed_model_list = sorted(new_parsed_list, key=lambda m: m.get('display_name', '').lower())
                     server.global_model_list_raw_json = json.dumps({"data": server.parsed_model_list, "object": "list"})
                     if DEBUG_LOGS_ENABLED:
-                        log_output = f"成功解析和更新模型列表。总共解析模型数: {len(server.parsed_model_list)}.\n"
+                        log_output = f"Successfully parsed and updated model list. Total: {len(server.parsed_model_list)}.\n"
                         for i, item in enumerate(server.parsed_model_list[:min(3, len(server.parsed_model_list))]):
                             log_output += f"  Model {i+1}: ID={item.get('id')}, Name={item.get('display_name')}, Temp={item.get('default_temperature')}, MaxTokDef={item.get('default_max_output_tokens')}, MaxTokSup={item.get('supported_max_output_tokens')}, TopP={item.get('default_top_p')}\n"
                         logger.info(log_output)
@@ -418,38 +379,38 @@ async def _handle_model_list_response(response: Any):
                 model_list_fetch_event.set()
 
 async def detect_and_extract_page_error(page: AsyncPage, req_id: str) -> Optional[str]:
-    """检测并提取页面错误"""
+    """Detect and extract page error"""
     error_toast_locator = page.locator(ERROR_TOAST_SELECTOR).last
     try:
         await error_toast_locator.wait_for(state='visible', timeout=500)
         message_locator = error_toast_locator.locator('span.content-text')
         error_message = await message_locator.text_content(timeout=500)
         if error_message:
-             logger.error(f"[{req_id}]    检测到并提取错误消息: {error_message}")
+             logger.error(f"[{req_id}]    Detected and extracted error message: {error_message}")
              return error_message.strip()
         else:
-             logger.warning(f"[{req_id}]    检测到错误提示框，但无法提取消息。")
-             return "检测到错误提示框，但无法提取特定消息。"
+             logger.warning(f"[{req_id}]    Detected error toast but could not extract message.")
+             return "Detected error toast but no specific message extracted."
     except PlaywrightAsyncError: 
         return None
     except Exception as e:
-        logger.warning(f"[{req_id}]    检查页面错误时出错: {e}")
+        logger.warning(f"[{req_id}]    Error while checking page error: {e}")
         return None
 
 async def save_error_snapshot(error_name: str = 'error'):
-    """保存错误快照"""
+    """Save error snapshot"""
     import server
     name_parts = error_name.split('_')
     req_id = name_parts[-1] if len(name_parts) > 1 and len(name_parts[-1]) == 7 else None
     base_error_name = error_name if not req_id else '_'.join(name_parts[:-1])
-    log_prefix = f"[{req_id}]" if req_id else "[无请求ID]"
+    log_prefix = f"[{req_id}]" if req_id else "[NoReqID]"
     page_to_snapshot = server.page_instance
     
     if not server.browser_instance or not server.browser_instance.is_connected() or not page_to_snapshot or page_to_snapshot.is_closed():
-        logger.warning(f"{log_prefix} 无法保存快照 ({base_error_name})，浏览器/页面不可用。")
+        logger.warning(f"{log_prefix} Cannot save snapshot ({base_error_name}); browser/page unavailable.")
         return
     
-    logger.info(f"{log_prefix} 尝试保存错误快照 ({base_error_name})...")
+    logger.info(f"{log_prefix} Attempting to save error snapshot ({base_error_name})...")
     timestamp = int(time.time() * 1000)
     error_dir = os.path.join(os.path.dirname(__file__), '..', 'errors_py')
     
@@ -462,9 +423,9 @@ async def save_error_snapshot(error_name: str = 'error'):
         
         try:
             await page_to_snapshot.screenshot(path=screenshot_path, full_page=True, timeout=15000)
-            logger.info(f"{log_prefix}   快照已保存到: {screenshot_path}")
+            logger.info(f"{log_prefix}   Snapshot saved to: {screenshot_path}")
         except Exception as ss_err:
-            logger.error(f"{log_prefix}   保存屏幕截图失败 ({base_error_name}): {ss_err}")
+            logger.error(f"{log_prefix}   Failed to save screenshot ({base_error_name}): {ss_err}")
         
         try:
             content = await page_to_snapshot.content()
@@ -472,28 +433,28 @@ async def save_error_snapshot(error_name: str = 'error'):
             try:
                 f = open(html_path, 'w', encoding='utf-8')
                 f.write(content)
-                logger.info(f"{log_prefix}   HTML 已保存到: {html_path}")
+                logger.info(f"{log_prefix}   HTML saved to: {html_path}")
             except Exception as write_err:
-                logger.error(f"{log_prefix}   保存 HTML 失败 ({base_error_name}): {write_err}")
+                logger.error(f"{log_prefix}   Failed to save HTML ({base_error_name}): {write_err}")
             finally:
                 if f:
                     try:
                         f.close()
-                        logger.debug(f"{log_prefix}   HTML 文件已正确关闭")
+                        logger.debug(f"{log_prefix}   HTML file closed properly")
                     except Exception as close_err:
-                        logger.error(f"{log_prefix}   关闭 HTML 文件时出错: {close_err}")
+                        logger.error(f"{log_prefix}   Error while closing HTML file: {close_err}")
         except Exception as html_err:
-            logger.error(f"{log_prefix}   获取页面内容失败 ({base_error_name}): {html_err}")
+            logger.error(f"{log_prefix}   Failed to get page content ({base_error_name}): {html_err}")
     except Exception as dir_err:
-        logger.error(f"{log_prefix}   创建错误目录或保存快照时发生其他错误 ({base_error_name}): {dir_err}")
+        logger.error(f"{log_prefix}   Other error while creating error directory or saving snapshot ({base_error_name}): {dir_err}")
 
 async def get_response_via_edit_button(
     page: AsyncPage,
     req_id: str,
     check_client_disconnected: Callable
 ) -> Optional[str]:
-    """通过编辑按钮获取响应"""
-    logger.info(f"[{req_id}] (Helper) 尝试通过编辑按钮获取响应...")
+    """Get response via Edit button"""
+    logger.info(f"[{req_id}] (Helper) Attempting to get response via Edit button...")
     last_message_container = page.locator('ms-chat-turn').last
     edit_button = last_message_container.get_by_label("Edit")
     finish_edit_button = last_message_container.get_by_label("Stop editing")
@@ -501,100 +462,98 @@ async def get_response_via_edit_button(
     actual_textarea_locator = autosize_textarea_locator.locator('textarea')
     
     try:
-        logger.info(f"[{req_id}]   - 尝试悬停最后一条消息以显示 'Edit' 按钮...")
+        logger.info(f"[{req_id}]   - Hover last message to show 'Edit' button...")
         try:
-            # 对消息容器执行悬停操作
-            await last_message_container.hover(timeout=CLICK_TIMEOUT_MS / 2) # 使用一半的点击超时作为悬停超时
-            await asyncio.sleep(0.3) # 等待悬停效果生效
-            check_client_disconnected("编辑响应 - 悬停后: ")
+            await last_message_container.hover(timeout=CLICK_TIMEOUT_MS / 2)
+            await asyncio.sleep(0.3)
+            check_client_disconnected("Edit response - after hover: ")
         except Exception as hover_err:
-            logger.warning(f"[{req_id}]   - (get_response_via_edit_button) 悬停最后一条消息失败 (忽略): {type(hover_err).__name__}")
-            # 即使悬停失败，也继续尝试后续操作，Playwright的expect_async可能会处理
+            logger.warning(f"[{req_id}]   - (get_response_via_edit_button) Hover last message failed (ignored): {type(hover_err).__name__}")
         
-        logger.info(f"[{req_id}]   - 定位并点击 'Edit' 按钮...")
+        logger.info(f"[{req_id}]   - Locate and click 'Edit' button...")
         try:
             from playwright.async_api import expect as expect_async
             await expect_async(edit_button).to_be_visible(timeout=CLICK_TIMEOUT_MS)
-            check_client_disconnected("编辑响应 - 'Edit' 按钮可见后: ")
+            check_client_disconnected("Edit response - after 'Edit' visible: ")
             await edit_button.click(timeout=CLICK_TIMEOUT_MS)
-            logger.info(f"[{req_id}]   - 'Edit' 按钮已点击。")
+            logger.info(f"[{req_id}]   - 'Edit' clicked.")
         except Exception as edit_btn_err:
-            logger.error(f"[{req_id}]   - 'Edit' 按钮不可见或点击失败: {edit_btn_err}")
+            logger.error(f"[{req_id}]   - 'Edit' not visible or click failed: {edit_btn_err}")
             await save_error_snapshot(f"edit_response_edit_button_failed_{req_id}")
             return None
         
-        check_client_disconnected("编辑响应 - 点击 'Edit' 按钮后: ")
+        check_client_disconnected("Edit response - after 'Edit' click: ")
         await asyncio.sleep(0.3)
-        check_client_disconnected("编辑响应 - 点击 'Edit' 按钮后延时后: ")
+        check_client_disconnected("Edit response - after 'Edit' click delay: ")
         
-        logger.info(f"[{req_id}]   - 从文本区域获取内容...")
+        logger.info(f"[{req_id}]   - Get content from textarea...")
         response_content = None
         textarea_failed = False
         
         try:
             await expect_async(autosize_textarea_locator).to_be_visible(timeout=CLICK_TIMEOUT_MS)
-            check_client_disconnected("编辑响应 - autosize-textarea 可见后: ")
+            check_client_disconnected("Edit response - after autosize-textarea visible: ")
             
             try:
                 data_value_content = await autosize_textarea_locator.get_attribute("data-value")
-                check_client_disconnected("编辑响应 - get_attribute data-value 后: ")
+                check_client_disconnected("Edit response - after get_attribute data-value: ")
                 if data_value_content is not None:
                     response_content = str(data_value_content)
-                    logger.info(f"[{req_id}]   - 从 data-value 获取内容成功。")
+                    logger.info(f"[{req_id}]   - Content from data-value succeeded.")
             except Exception as data_val_err:
-                logger.warning(f"[{req_id}]   - 获取 data-value 失败: {data_val_err}")
-                check_client_disconnected("编辑响应 - get_attribute data-value 错误后: ")
+                logger.warning(f"[{req_id}]   - Failed to get data-value: {data_val_err}")
+                check_client_disconnected("Edit response - after get_attribute data-value error: ")
             
             if response_content is None:
-                logger.info(f"[{req_id}]   - data-value 获取失败或为None，尝试从内部 textarea 获取 input_value...")
+                logger.info(f"[{req_id}]   - data-value not available, try textarea input_value...")
                 try:
                     await expect_async(actual_textarea_locator).to_be_visible(timeout=CLICK_TIMEOUT_MS/2)
                     input_val_content = await actual_textarea_locator.input_value(timeout=CLICK_TIMEOUT_MS/2)
-                    check_client_disconnected("编辑响应 - input_value 后: ")
+                    check_client_disconnected("Edit response - after input_value: ")
                     if input_val_content is not None:
                         response_content = str(input_val_content)
-                        logger.info(f"[{req_id}]   - 从 input_value 获取内容成功。")
+                        logger.info(f"[{req_id}]   - Content from input_value succeeded.")
                 except Exception as input_val_err:
-                     logger.warning(f"[{req_id}]   - 获取 input_value 也失败: {input_val_err}")
-                     check_client_disconnected("编辑响应 - input_value 错误后: ")
+                     logger.warning(f"[{req_id}]   - Getting input_value failed: {input_val_err}")
+                     check_client_disconnected("Edit response - after input_value error: ")
             
             if response_content is not None:
                 response_content = response_content.strip()
                 content_preview = response_content[:100].replace('\\n', '\\\\n')
-                logger.info(f"[{req_id}]   - ✅ 最终获取内容 (长度={len(response_content)}): '{content_preview}...'")
+                logger.info(f"[{req_id}]   - ✅ Final content (length={len(response_content)}): '{content_preview}...'")
             else:
-                logger.warning(f"[{req_id}]   - 所有方法 (data-value, input_value) 内容获取均失败或返回 None。")
+                logger.warning(f"[{req_id}]   - Both data-value and input_value failed or returned None.")
                 textarea_failed = True
                 
         except Exception as textarea_err:
-            logger.error(f"[{req_id}]   - 定位或处理文本区域时失败: {textarea_err}")
+            logger.error(f"[{req_id}]   - Failed locating/handling textarea: {textarea_err}")
             textarea_failed = True
             response_content = None
-            check_client_disconnected("编辑响应 - 获取文本区域错误后: ")
+            check_client_disconnected("Edit response - after textarea error: ")
         
         if not textarea_failed:
-            logger.info(f"[{req_id}]   - 定位并点击 'Stop editing' 按钮...")
+            logger.info(f"[{req_id}]   - Locate and click 'Stop editing' button...")
             try:
                 await expect_async(finish_edit_button).to_be_visible(timeout=CLICK_TIMEOUT_MS)
-                check_client_disconnected("编辑响应 - 'Stop editing' 按钮可见后: ")
+                check_client_disconnected("Edit response - after 'Stop editing' visible: ")
                 await finish_edit_button.click(timeout=CLICK_TIMEOUT_MS)
-                logger.info(f"[{req_id}]   - 'Stop editing' 按钮已点击。")
+                logger.info(f"[{req_id}]   - 'Stop editing' clicked.")
             except Exception as finish_btn_err:
-                logger.warning(f"[{req_id}]   - 'Stop editing' 按钮不可见或点击失败: {finish_btn_err}")
+                logger.warning(f"[{req_id}]   - 'Stop editing' not visible or click failed: {finish_btn_err}")
                 await save_error_snapshot(f"edit_response_finish_button_failed_{req_id}")
-            check_client_disconnected("编辑响应 - 点击 'Stop editing' 后: ")
+            check_client_disconnected("Edit response - after 'Stop editing' click: ")
             await asyncio.sleep(0.2)
-            check_client_disconnected("编辑响应 - 点击 'Stop editing' 后延时后: ")
+            check_client_disconnected("Edit response - after 'Stop editing' delay: ")
         else:
-             logger.info(f"[{req_id}]   - 跳过点击 'Stop editing' 按钮，因为文本区域读取失败。")
+             logger.info(f"[{req_id}]   - Skipping 'Stop editing' click because textarea read failed.")
         
         return response_content
         
     except ClientDisconnectedError:
-        logger.info(f"[{req_id}] (Helper Edit) 客户端断开连接。")
+        logger.info(f"[{req_id}] (Helper Edit) Client disconnected.")
         raise
     except Exception as e:
-        logger.exception(f"[{req_id}] 通过编辑按钮获取响应过程中发生意外错误")
+        logger.exception(f"[{req_id}] Unexpected error while getting response via Edit button")
         await save_error_snapshot(f"edit_response_unexpected_error_{req_id}")
         return None
 
@@ -603,81 +562,81 @@ async def get_response_via_copy_button(
     req_id: str,
     check_client_disconnected: Callable
 ) -> Optional[str]:
-    """通过复制按钮获取响应"""
-    logger.info(f"[{req_id}] (Helper) 尝试通过复制按钮获取响应...")
+    """Get response via Copy button"""
+    logger.info(f"[{req_id}] (Helper) Attempting to get response via Copy button...")
     last_message_container = page.locator('ms-chat-turn').last
     more_options_button = last_message_container.get_by_label("Open options")
     copy_markdown_button = page.get_by_role("menuitem", name="Copy markdown")
     
     try:
-        logger.info(f"[{req_id}]   - 尝试悬停最后一条消息以显示选项...")
+        logger.info(f"[{req_id}]   - Hover last message to show options...")
         await last_message_container.hover(timeout=CLICK_TIMEOUT_MS)
-        check_client_disconnected("复制响应 - 悬停后: ")
+        check_client_disconnected("Copy response - after hover: ")
         await asyncio.sleep(0.5)
-        check_client_disconnected("复制响应 - 悬停后延时后: ")
-        logger.info(f"[{req_id}]   - 已悬停。")
+        check_client_disconnected("Copy response - after hover delay: ")
+        logger.info(f"[{req_id}]   - Hovered.")
         
-        logger.info(f"[{req_id}]   - 定位并点击 '更多选项' 按钮...")
+        logger.info(f"[{req_id}]   - Locate and click 'More options' button...")
         try:
             from playwright.async_api import expect as expect_async
             await expect_async(more_options_button).to_be_visible(timeout=CLICK_TIMEOUT_MS)
-            check_client_disconnected("复制响应 - 更多选项按钮可见后: ")
+            check_client_disconnected("Copy response - after More options visible: ")
             await more_options_button.click(timeout=CLICK_TIMEOUT_MS)
-            logger.info(f"[{req_id}]   - '更多选项' 已点击 (通过 get_by_label)。")
+            logger.info(f"[{req_id}]   - 'More options' clicked (get_by_label).")
         except Exception as more_opts_err:
-            logger.error(f"[{req_id}]   - '更多选项' 按钮 (通过 get_by_label) 不可见或点击失败: {more_opts_err}")
+            logger.error(f"[{req_id}]   - 'More options' (get_by_label) not visible or click failed: {more_opts_err}")
             await save_error_snapshot(f"copy_response_more_options_failed_{req_id}")
             return None
         
-        check_client_disconnected("复制响应 - 点击更多选项后: ")
+        check_client_disconnected("Copy response - after More options click: ")
         await asyncio.sleep(0.5)
-        check_client_disconnected("复制响应 - 点击更多选项后延时后: ")
+        check_client_disconnected("Copy response - after More options delay: ")
         
-        logger.info(f"[{req_id}]   - 定位并点击 '复制 Markdown' 按钮...")
+        logger.info(f"[{req_id}]   - Locate and click 'Copy Markdown' button...")
         copy_success = False
         try:
             await expect_async(copy_markdown_button).to_be_visible(timeout=CLICK_TIMEOUT_MS)
-            check_client_disconnected("复制响应 - 复制按钮可见后: ")
+            check_client_disconnected("Copy response - after copy button visible: ")
             await copy_markdown_button.click(timeout=CLICK_TIMEOUT_MS, force=True)
             copy_success = True
-            logger.info(f"[{req_id}]   - 已点击 '复制 Markdown' (通过 get_by_role)。")
+            logger.info(f"[{req_id}]   - 'Copy Markdown' clicked (get_by_role).")
         except Exception as copy_err:
-            logger.error(f"[{req_id}]   - '复制 Markdown' 按钮 (通过 get_by_role) 点击失败: {copy_err}")
+            logger.error(f"[{req_id}]   - 'Copy Markdown' (get_by_role) click failed: {copy_err}")
             await save_error_snapshot(f"copy_response_copy_button_failed_{req_id}")
             return None
         
         if not copy_success:
-             logger.error(f"[{req_id}]   - 未能点击 '复制 Markdown' 按钮。")
+             logger.error(f"[{req_id}]   - Could not click 'Copy Markdown' button.")
              return None
              
-        check_client_disconnected("复制响应 - 点击复制按钮后: ")
+        check_client_disconnected("Copy response - after copy click: ")
         await asyncio.sleep(0.5)
-        check_client_disconnected("复制响应 - 点击复制按钮后延时后: ")
+        check_client_disconnected("Copy response - after copy delay: ")
         
-        logger.info(f"[{req_id}]   - 正在读取剪贴板内容...")
+        logger.info(f"[{req_id}]   - Reading clipboard content...")
         try:
             clipboard_content = await page.evaluate('navigator.clipboard.readText()')
-            check_client_disconnected("复制响应 - 读取剪贴板后: ")
+            check_client_disconnected("Copy response - after clipboard read: ")
             if clipboard_content:
                 content_preview = clipboard_content[:100].replace('\n', '\\\\n')
-                logger.info(f"[{req_id}]   - ✅ 成功获取剪贴板内容 (长度={len(clipboard_content)}): '{content_preview}...'")
+                logger.info(f"[{req_id}]   - ✅ Successfully got clipboard content (length={len(clipboard_content)}): '{content_preview}...'")
                 return clipboard_content
             else:
-                logger.error(f"[{req_id}]   - 剪贴板内容为空。")
+                logger.error(f"[{req_id}]   - Clipboard content is empty.")
                 return None
         except Exception as clipboard_err:
             if "clipboard-read" in str(clipboard_err):
-                 logger.error(f"[{req_id}]   - 读取剪贴板失败: 可能是权限问题。错误: {clipboard_err}")
+                 logger.error(f"[{req_id}]   - Clipboard read failed: possibly permission issue. Error: {clipboard_err}")
             else:
-                 logger.error(f"[{req_id}]   - 读取剪贴板失败: {clipboard_err}")
+                 logger.error(f"[{req_id}]   - Clipboard read failed: {clipboard_err}")
             await save_error_snapshot(f"copy_response_clipboard_read_failed_{req_id}")
             return None
             
     except ClientDisconnectedError:
-        logger.info(f"[{req_id}] (Helper Copy) 客户端断开连接。")
+        logger.info(f"[{req_id}] (Helper Copy) Client disconnected.")
         raise
     except Exception as e:
-        logger.exception(f"[{req_id}] 复制响应过程中发生意外错误")
+        logger.exception(f"[{req_id}] Unexpected error while getting response via Copy button")
         await save_error_snapshot(f"copy_response_unexpected_error_{req_id}")
         return None
 
@@ -692,115 +651,115 @@ async def _wait_for_response_completion(
     timeout_ms=RESPONSE_COMPLETION_TIMEOUT,
     initial_wait_ms=INITIAL_WAIT_MS_BEFORE_POLLING
 ) -> bool:
-    """等待响应完成"""
+    """Wait for response completion"""
     from playwright.async_api import TimeoutError
     
-    logger.info(f"[{req_id}] (WaitV3) 开始等待响应完成... (超时: {timeout_ms}ms)")
-    await asyncio.sleep(initial_wait_ms / 1000) # Initial brief wait
+    logger.info(f"[{req_id}] (WaitV3) Start waiting for response completion... (timeout: {timeout_ms}ms)")
+    await asyncio.sleep(initial_wait_ms / 1000)
     
     start_time = time.time()
-    wait_timeout_ms_short = 3000 # 3 seconds for individual element checks
+    wait_timeout_ms_short = 3000
     
     consecutive_empty_input_submit_disabled_count = 0
     
     while True:
         try:
-            check_client_disconnected_func("等待响应完成 - 循环开始")
+            check_client_disconnected_func("Wait for completion - loop start")
         except ClientDisconnectedError:
-            logger.info(f"[{req_id}] (WaitV3) 客户端断开连接，中止等待。")
+            logger.info(f"[{req_id}] (WaitV3) Client disconnected, abort waiting.")
             return False
 
         current_time_elapsed_ms = (time.time() - start_time) * 1000
         if current_time_elapsed_ms > timeout_ms:
-            logger.error(f"[{req_id}] (WaitV3) 等待响应完成超时 ({timeout_ms}ms)。")
+            logger.error(f"[{req_id}] (WaitV3) Timeout waiting for response completion ({timeout_ms}ms).")
             await save_error_snapshot(f"wait_completion_v3_overall_timeout_{req_id}")
             return False
 
         try:
-            check_client_disconnected_func("等待响应完成 - 超时检查后")
+            check_client_disconnected_func("Wait for completion - after timeout check")
         except ClientDisconnectedError:
             return False
 
-        # --- 主要条件: 输入框空 & 提交按钮禁用 ---
+        # Main condition: input empty & submit disabled
         is_input_empty = await prompt_textarea_locator.input_value() == ""
         is_submit_disabled = False
         try:
             is_submit_disabled = await submit_button_locator.is_disabled(timeout=wait_timeout_ms_short)
         except TimeoutError:
-            logger.warning(f"[{req_id}] (WaitV3) 检查提交按钮是否禁用超时。为本次检查假定其未禁用。")
+            logger.warning(f"[{req_id}] (WaitV3) Timeout checking submit button disabled; assume not disabled for this check.")
         
         try:
-            check_client_disconnected_func("等待响应完成 - 按钮状态检查后")
+            check_client_disconnected_func("Wait for completion - after button check")
         except ClientDisconnectedError:
             return False
 
         if is_input_empty and is_submit_disabled:
             consecutive_empty_input_submit_disabled_count += 1
             if DEBUG_LOGS_ENABLED:
-                logger.debug(f"[{req_id}] (WaitV3) 主要条件满足: 输入框空，提交按钮禁用 (计数: {consecutive_empty_input_submit_disabled_count})。")
+                logger.debug(f"[{req_id}] (WaitV3) Main condition met: input empty, submit disabled (count: {consecutive_empty_input_submit_disabled_count}).")
 
-            # --- 最终确认: 编辑按钮可见 ---
+            # Final confirmation: edit button visible
             try:
                 if await edit_button_locator.is_visible(timeout=wait_timeout_ms_short):
-                    logger.info(f"[{req_id}] (WaitV3) ✅ 响应完成: 输入框空，提交按钮禁用，编辑按钮可见。")
-                    return True # 明确完成
+                    logger.info(f"[{req_id}] (WaitV3) ✅ Response completed: input empty, submit disabled, edit button visible.")
+                    return True
             except TimeoutError:
                 if DEBUG_LOGS_ENABLED:
-                    logger.debug(f"[{req_id}] (WaitV3) 主要条件满足后，检查编辑按钮可见性超时。")
+                    logger.debug(f"[{req_id}] (WaitV3) Timeout checking edit button visibility after main condition.")
             
             try:
-                check_client_disconnected_func("等待响应完成 - 编辑按钮检查后")
+                check_client_disconnected_func("Wait for completion - after edit button check")
             except ClientDisconnectedError:
                 return False
 
-            # 启发式完成: 如果主要条件持续满足，但编辑按钮仍未出现
-            if consecutive_empty_input_submit_disabled_count >= 3: # 例如，大约 1.5秒 (3 * 0.5秒轮询)
-                logger.warning(f"[{req_id}] (WaitV3) 响应可能已完成 (启发式): 输入框空，提交按钮禁用，但在 {consecutive_empty_input_submit_disabled_count} 次检查后编辑按钮仍未出现。假定完成。后续若内容获取失败，可能与此有关。")
-                return True # 启发式完成
-        else: # 主要条件 (输入框空 & 提交按钮禁用) 未满足
-            consecutive_empty_input_submit_disabled_count = 0 # 重置计数器
+            # Heuristic completion
+            if consecutive_empty_input_submit_disabled_count >= 3:
+                logger.warning(f"[{req_id}] (WaitV3) Response likely completed (heuristic): input empty, submit disabled, but edit button did not appear after {consecutive_empty_input_submit_disabled_count} checks.")
+                return True
+        else:
+            consecutive_empty_input_submit_disabled_count = 0
             if DEBUG_LOGS_ENABLED:
                 reasons = []
                 if not is_input_empty: 
-                    reasons.append("输入框非空")
+                    reasons.append("input not empty")
                 if not is_submit_disabled: 
-                    reasons.append("提交按钮非禁用")
-                logger.debug(f"[{req_id}] (WaitV3) 主要条件未满足 ({', '.join(reasons)}). 继续轮询...")
+                    reasons.append("submit not disabled")
+                logger.debug(f"[{req_id}] (WaitV3) Main condition not met ({', '.join(reasons)}). Continue polling...")
 
-        await asyncio.sleep(0.5) # 轮询间隔
+        await asyncio.sleep(0.5)
 
 async def _get_final_response_content(
     page: AsyncPage,
     req_id: str,
     check_client_disconnected: Callable
 ) -> Optional[str]:
-    """获取最终响应内容"""
-    logger.info(f"[{req_id}] (Helper GetContent) 开始获取最终响应内容...")
+    """Get final response content"""
+    logger.info(f"[{req_id}] (Helper GetContent) Start getting final response content...")
     response_content = await get_response_via_edit_button(
         page, req_id, check_client_disconnected
     )
     if response_content is not None:
-        logger.info(f"[{req_id}] (Helper GetContent) ✅ 成功通过编辑按钮获取内容。")
+        logger.info(f"[{req_id}] (Helper GetContent) ✅ Successfully got content via Edit button.")
         return response_content
     
-    logger.warning(f"[{req_id}] (Helper GetContent) 编辑按钮方法失败或返回空，回退到复制按钮方法...")
+    logger.warning(f"[{req_id}] (Helper GetContent) Edit button method failed/empty; fallback to Copy button method...")
     response_content = await get_response_via_copy_button(
         page, req_id, check_client_disconnected
     )
     if response_content is not None:
-        logger.info(f"[{req_id}] (Helper GetContent) ✅ 成功通过复制按钮获取内容。")
+        logger.info(f"[{req_id}] (Helper GetContent) ✅ Successfully got content via Copy button.")
         return response_content
     
-    logger.error(f"[{req_id}] (Helper GetContent) 所有获取响应内容的方法均失败。")
+    logger.error(f"[{req_id}] (Helper GetContent) All methods to get response content failed.")
     await save_error_snapshot(f"get_content_all_methods_failed_{req_id}")
     return None 
 
 async def create_new_chat(page: AsyncPage, req_id: str) -> bool:
     """
-    在 AI Studio 页面上创建一个新会话。
-    逻辑：点击 "New chat" 按钮并在确认对话框中点击 "Discard and continue"。
-    若确认遮罩已存在，则直接点击确认。
-    返回 True 表示成功触发新会话创建；失败返回 False。
+    Create a new chat on AI Studio page.
+    Logic: click "New chat" and confirm dialog "Discard and continue" if present.
+    If overlay already present, confirm directly.
+    Returns True on success; False otherwise.
     """
     logger.info(f"[{req_id}] ACTION: Attempting to create a new chat...")
     try:
@@ -808,7 +767,6 @@ async def create_new_chat(page: AsyncPage, req_id: str) -> bool:
         confirm_button = page.locator(CLEAR_CHAT_CONFIRM_BUTTON_SELECTOR)
         overlay_locator = page.locator(OVERLAY_SELECTOR)
 
-        # 若确认遮罩已显示，直接确认
         overlay_visible = False
         try:
             overlay_visible = await overlay_locator.is_visible(timeout=500)
@@ -831,7 +789,6 @@ async def create_new_chat(page: AsyncPage, req_id: str) -> bool:
                     pass
                 await clear_chat_button.click(timeout=CLICK_TIMEOUT_MS, force=True)
 
-            # 等待确认遮罩出现
             try:
                 await overlay_locator.wait_for(state='visible', timeout=WAIT_FOR_ELEMENT_TIMEOUT_MS)
                 logger.info(f"[{req_id}] New chat confirmation overlay appeared; clicking confirm...")
@@ -842,13 +799,11 @@ async def create_new_chat(page: AsyncPage, req_id: str) -> bool:
 
             await confirm_button.click(timeout=CLICK_TIMEOUT_MS)
 
-        # 尝试等待遮罩消失（不强制失败）
         try:
             await overlay_locator.wait_for(state='hidden', timeout=3000)
         except Exception:
             pass
 
-        # 简单验证：页面URL包含 new_chat 视为已创建，会话输入框应为空由后续流程保障
         try:
             url = page.url.rstrip('/')
             if 'new_chat' in url:
@@ -857,7 +812,7 @@ async def create_new_chat(page: AsyncPage, req_id: str) -> bool:
             pass
 
         return True
-    except Exception as e:
+    except Exception:
         logger.exception(f"[{req_id}] ACTION-FAIL: Error while creating new chat")
         try:
             await save_error_snapshot(f"new_chat_error_{req_id}")
@@ -875,7 +830,6 @@ async def click_run_button(page: AsyncPage, req_id: str, delay_ms: int = 0) -> b
         if delay_ms and delay_ms > 0:
             await asyncio.sleep(delay_ms / 1000.0)
 
-        # If overlay present, confirm first
         try:
             if await overlay_locator.count() > 0:
                 await confirm_button.click(timeout=CLICK_TIMEOUT_MS)
@@ -886,7 +840,6 @@ async def click_run_button(page: AsyncPage, req_id: str, delay_ms: int = 0) -> b
         except Exception:
             pass
 
-        # Ensure button enabled before click (best-effort)
         try:
             await submit_button.wait_for(state='visible', timeout=3000)
         except Exception:
@@ -917,7 +870,6 @@ async def click_stop_button(page: AsyncPage, req_id: str, delay_ms: int = 0) -> 
         if delay_ms and delay_ms > 0:
             await asyncio.sleep(delay_ms / 1000.0)
 
-        # Handle confirm overlay if present (same as Run)
         try:
             if await overlay_locator.count() > 0:
                 await confirm_button.click(timeout=CLICK_TIMEOUT_MS)
@@ -928,9 +880,7 @@ async def click_stop_button(page: AsyncPage, req_id: str, delay_ms: int = 0) -> 
         except Exception:
             pass
 
-        # Best-effort: if spinner visible, the button becomes "Stop" state; otherwise still click to toggle
         try:
-            # Let the spinner appear (short wait), then attempt click
             try:
                 await spinner_locator.first.wait_for(state='visible', timeout=1500)
             except Exception:

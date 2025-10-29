@@ -53,10 +53,10 @@ from .utils_ext import (
 
 # --- 提示准备函数 ---
 def prepare_combined_prompt(messages: List[Message], req_id: str, tools: Optional[List[Dict[str, Any]]] = None, tool_choice: Optional[Union[str, Dict[str, Any]]] = None) -> Tuple[str, List[str]]:
-    """准备组合提示"""
+    """Prepare combined prompt"""
     from server import logger
     
-    logger.info(f"[{req_id}] (准备提示) 正在从 {len(messages)} 条消息准备组合提示 (包括历史)。")
+    logger.info(f"[{req_id}] (Prompt Preparation) Preparing combined prompt from {len(messages)} messages (including history).")
     # 不在此处清空 upload_files；由上层在每次请求开始时按需清理，避免历史附件丢失导致“文件不存在”错误。
     
     combined_parts = []
@@ -67,7 +67,7 @@ def prepare_combined_prompt(messages: List[Message], req_id: str, tools: Optiona
     # 若声明了可用工具，先在提示前注入工具目录，帮助模型知晓可用函数（内部适配，不影响外部协议）
     if isinstance(tools, list) and len(tools) > 0:
         try:
-            tool_lines: List[str] = ["可用工具目录:"]
+            tool_lines: List[str] = ["Available tools:"]
             for t in tools:
                 name = None
                 params_schema = None
@@ -79,10 +79,10 @@ def prepare_combined_prompt(messages: List[Message], req_id: str, tools: Optiona
                     else:
                         name = t.get('name')
                 if name:
-                    tool_lines.append(f"- 函数: {name}")
+                    tool_lines.append(f"- function: {name}")
                     if params_schema:
                         try:
-                            tool_lines.append(f"  参数模式: {json.dumps(params_schema, ensure_ascii=False)}")
+                            tool_lines.append(f"  parameters schema: {json.dumps(params_schema, ensure_ascii=False)}")
                         except Exception:
                             pass
             if tool_choice:
@@ -95,7 +95,7 @@ def prepare_combined_prompt(messages: List[Message], req_id: str, tools: Optiona
                 elif isinstance(tool_choice, str) and tool_choice.lower() not in ('auto', 'none', 'no', 'off', 'required', 'any'):
                     chosen_name = tool_choice
                 if chosen_name:
-                    tool_lines.append(f"建议优先使用函数: {chosen_name}")
+                    tool_lines.append(f"Prefer using function: {chosen_name}")
             combined_parts.append("\n".join(tool_lines) + "\n---\n")
         except Exception:
             pass
@@ -107,15 +107,15 @@ def prepare_combined_prompt(messages: List[Message], req_id: str, tools: Optiona
             if isinstance(content, str) and content.strip():
                 system_prompt_content = content.strip()
                 processed_system_message_indices.add(i)
-                logger.info(f"[{req_id}] (准备提示) 在索引 {i} 找到并使用系统提示: '{system_prompt_content[:80]}...'")
-                system_instr_prefix = "系统指令:\n"
+                logger.info(f"[{req_id}] (Prompt Preparation) Found and using system prompt at index {i}: '{system_prompt_content[:80]}...'")
+                system_instr_prefix = "System Instruction:\n"
                 combined_parts.append(f"{system_instr_prefix}{system_prompt_content}")
             else:
-                logger.info(f"[{req_id}] (准备提示) 在索引 {i} 忽略非字符串或空的系统消息。")
+                logger.info(f"[{req_id}] (Prompt Preparation) Ignored non-string or empty system message at index {i}.")
                 processed_system_message_indices.add(i)
             break
     
-    role_map_ui = {"user": "用户", "assistant": "助手", "system": "系统", "tool": "工具"}
+    role_map_ui = {"user": "User", "assistant": "Assistant", "system": "System", "tool": "Tool"}
     turn_separator = "\n---\n"
     
     # 处理其他消息
@@ -124,7 +124,7 @@ def prepare_combined_prompt(messages: List[Message], req_id: str, tools: Optiona
             continue
         
         if msg.role == 'system':
-            logger.info(f"[{req_id}] (准备提示) 跳过在索引 {i} 的后续系统消息。")
+            logger.info(f"[{req_id}] (Prompt Preparation) Skipping subsequent system message at index {i}.")
             continue
         
         if combined_parts:
@@ -175,7 +175,7 @@ def prepare_combined_prompt(messages: List[Message], req_id: str, tools: Optiona
                             try:
                                 detail_val = getattr(item.image_url, 'detail', None)
                                 if detail_val:
-                                    text_parts.append(f"[图像细节: detail={detail_val}]")
+                                    text_parts.append(f"[Image detail: detail={detail_val}]")
                             except Exception:
                                 pass
                         elif hasattr(item, 'input_image') and item.input_image:
@@ -183,7 +183,7 @@ def prepare_combined_prompt(messages: List[Message], req_id: str, tools: Optiona
                             try:
                                 detail_val = getattr(item.input_image, 'detail', None)
                                 if detail_val:
-                                    text_parts.append(f"[图像细节: detail={detail_val}]")
+                                    text_parts.append(f"[Image detail: detail={detail_val}]")
                             except Exception:
                                 pass
                         elif hasattr(item, 'file_url') and item.file_url:
@@ -198,14 +198,14 @@ def prepare_combined_prompt(messages: List[Message], req_id: str, tools: Optiona
                                 url_value = item['image_url'].get('url')
                                 detail_val = item['image_url'].get('detail')
                                 if detail_val:
-                                    text_parts.append(f"[图像细节: detail={detail_val}]")
+                                    text_parts.append(f"[Image detail: detail={detail_val}]")
                             elif isinstance(item.get('image_url'), str):
                                 url_value = item.get('image_url')
                             elif isinstance(item.get('input_image'), dict):
                                 url_value = item['input_image'].get('url')
                                 detail_val = item['input_image'].get('detail')
                                 if detail_val:
-                                    text_parts.append(f"[图像细节: detail={detail_val}]")
+                                    text_parts.append(f"[Image detail: detail={detail_val}]")
                             elif isinstance(item.get('input_image'), str):
                                 url_value = item.get('input_image')
                             elif isinstance(item.get('file_url'), dict):
@@ -231,22 +231,22 @@ def prepare_combined_prompt(messages: List[Message], req_id: str, tools: Optiona
                             file_path = extract_data_url_to_local(url_value, req_id=req_id)
                             if file_path:
                                 files_list.append(file_path)
-                                logger.info(f"[{req_id}] (准备提示) 已识别并加入 data:URL 附件: {file_path}")
+                                logger.info(f"[{req_id}] (Prompt Preparation) Detected and added data:URL attachment: {file_path}")
                         elif url_value.startswith('file:'):
                             parsed = urlparse(url_value)
                             local_path = unquote(parsed.path)
                             if os.path.exists(local_path):
                                 files_list.append(local_path)
-                                logger.info(f"[{req_id}] (准备提示) 已识别并加入本地附件(file://): {local_path}")
+                                logger.info(f"[{req_id}] (Prompt Preparation) Detected and added local attachment (file://): {local_path}")
                             else:
-                                logger.warning(f"[{req_id}] (准备提示) file URL 指向的本地文件不存在: {local_path}")
+                                logger.warning(f"[{req_id}] (Prompt Preparation) Local file pointed to by file URL does not exist: {local_path}")
                         elif os.path.isabs(url_value) and os.path.exists(url_value):
                             files_list.append(url_value)
-                            logger.info(f"[{req_id}] (准备提示) 已识别并加入本地附件(绝对路径): {url_value}")
+                            logger.info(f"[{req_id}] (Prompt Preparation) Detected and added local attachment (absolute path): {url_value}")
                         else:
-                            logger.info(f"[{req_id}] (准备提示) 忽略非本地附件 URL: {url_value}")
+                            logger.info(f"[{req_id}] (Prompt Preparation) Ignoring non-local attachment URL: {url_value}")
                     except Exception as e:
-                        logger.warning(f"[{req_id}] (准备提示) 处理附件 URL 时发生错误: {e}")
+                        logger.warning(f"[{req_id}] (Prompt Preparation) Error while processing attachment URL: {e}")
                     continue
 
                 # 音/视频输入
@@ -281,22 +281,22 @@ def prepare_combined_prompt(messages: List[Message], req_id: str, tools: Optiona
                                     saved = extract_data_url_to_local(url_value, req_id=req_id)
                                     if saved:
                                         files_list.append(saved)
-                                        logger.info(f"[{req_id}] (准备提示) 已识别并加入音视频 data:URL 附件: {saved}")
+                                        logger.info(f"[{req_id}] (Prompt Preparation) Detected and added audio/video data:URL attachment: {saved}")
                                 elif url_value.startswith('file:'):
                                     parsed = urlparse(url_value)
                                     local_path = unquote(parsed.path)
                                     if os.path.exists(local_path):
                                         files_list.append(local_path)
-                                        logger.info(f"[{req_id}] (准备提示) 已识别并加入音视频本地附件(file://): {local_path}")
+                                        logger.info(f"[{req_id}] (Prompt Preparation) Detected and added audio/video local attachment (file://): {local_path}")
                                 elif os.path.isabs(url_value) and os.path.exists(url_value):
                                     files_list.append(url_value)
-                                    logger.info(f"[{req_id}] (准备提示) 已识别并加入音视频本地附件(绝对路径): {url_value}")
+                                    logger.info(f"[{req_id}] (Prompt Preparation) Detected and added audio/video local attachment (absolute path): {url_value}")
                             elif data_val:
                                 if isinstance(data_val, str) and data_val.startswith('data:'):
                                     saved = extract_data_url_to_local(data_val, req_id=req_id)
                                     if saved:
                                         files_list.append(saved)
-                                        logger.info(f"[{req_id}] (准备提示) 已识别并加入音视频 data:URL 附件: {saved}")
+                                        logger.info(f"[{req_id}] (Prompt Preparation) Detected and added audio/video data:URL attachment: {saved}")
                                 else:
                                     # 认为是纯 base64 数据
                                     try:
@@ -304,15 +304,15 @@ def prepare_combined_prompt(messages: List[Message], req_id: str, tools: Optiona
                                         saved = save_blob_to_local(raw, mime_val, fmt_val, req_id=req_id)
                                         if saved:
                                             files_list.append(saved)
-                                            logger.info(f"[{req_id}] (准备提示) 已识别并加入音视频 base64 附件: {saved}")
+                                            logger.info(f"[{req_id}] (Prompt Preparation) Detected and added audio/video base64 attachment: {saved}")
                                     except Exception:
                                         pass
                     except Exception as e:
-                        logger.warning(f"[{req_id}] (准备提示) 处理音视频输入时出错: {e}")
+                        logger.warning(f"[{req_id}] (Prompt Preparation) Error while processing audio/video input: {e}")
                     continue
 
                 # 其他未知项：记录而不影响
-                logger.warning(f"[{req_id}] (准备提示) 警告: 在索引 {i} 的消息中忽略非文本或未知类型的 content item")
+                logger.warning(f"[{req_id}] (Prompt Preparation) Warning: Ignoring non-text or unknown content item in message at index {i}")
             content_str = "\n".join(text_parts).strip()
         elif isinstance(content, dict):
             # 兼容字典形式的内容，可能包含 'attachments'/'images'/'media'/'files'
@@ -338,24 +338,24 @@ def prepare_combined_prompt(messages: List[Message], req_id: str, tools: Optiona
                             fp = extract_data_url_to_local(url_value)
                             if fp:
                                 files_list.append(fp)
-                                logger.info(f"[{req_id}] (准备提示) 已识别并加入字典附件 data:URL: {fp}")
+                                logger.info(f"[{req_id}] (Prompt Preparation) Detected and added dict attachment data:URL: {fp}")
                         elif url_value.startswith('file:'):
                             parsed = urlparse(url_value)
                             lp = unquote(parsed.path)
                             if os.path.exists(lp):
                                 files_list.append(lp)
-                                logger.info(f"[{req_id}] (准备提示) 已识别并加入字典附件 file://: {lp}")
+                                logger.info(f"[{req_id}] (Prompt Preparation) Detected and added dict attachment file://: {lp}")
                         elif os.path.isabs(url_value) and os.path.exists(url_value):
                             files_list.append(url_value)
-                            logger.info(f"[{req_id}] (准备提示) 已识别并加入字典附件绝对路径: {url_value}")
+                            logger.info(f"[{req_id}] (Prompt Preparation) Detected and added dict attachment absolute path: {url_value}")
                         else:
-                            logger.info(f"[{req_id}] (准备提示) 忽略字典附件的非本地 URL: {url_value}")
+                            logger.info(f"[{req_id}] (Prompt Preparation) Ignoring non-local URL in dict attachment: {url_value}")
             # 同时将字典中可能的纯文本说明拼入
             if isinstance(content.get('text'), str):
                 text_parts.append(content.get('text'))
             content_str = "\n".join(text_parts).strip()
         else:
-            logger.warning(f"[{req_id}] (准备提示) 警告: 角色 {role} 在索引 {i} 的内容类型意外 ({type(content)}) 或为 None。")
+            logger.warning(f"[{req_id}] (Prompt Preparation) Warning: Unexpected content type ({type(content)}) or None for role {role} at index {i}.")
             content_str = str(content or "").strip()
         
         if content_str:
@@ -381,7 +381,7 @@ def prepare_combined_prompt(messages: List[Message], req_id: str, tools: Optiona
                         formatted_args = func_args_str if func_args_str is not None else "{}"
                     
                     tool_call_visualizations.append(
-                        f"请求调用函数: {func_name}\n参数:\n{formatted_args}"
+                        f"Function call requested: {func_name}\nArguments:\n{formatted_args}"
                     )
             
             if tool_call_visualizations:
@@ -393,7 +393,7 @@ def prepare_combined_prompt(messages: List[Message], req_id: str, tools: Optiona
             # 标准 OpenAI 样式：content 为字符串，tool_call_id 关联上一轮调用
             tool_call_id = getattr(msg, 'tool_call_id', None)
             if tool_call_id:
-                tool_result_lines.append(f"工具结果 (tool_call_id={tool_call_id}):")
+                tool_result_lines.append(f"Tool result (tool_call_id={tool_call_id}):")
             if isinstance(msg.content, str):
                 tool_result_lines.append(msg.content)
             elif isinstance(msg.content, list):
@@ -416,16 +416,16 @@ def prepare_combined_prompt(messages: List[Message], req_id: str, tools: Optiona
         if len(current_turn_parts) > 1 or (role == 'assistant' and tool_calls):
             combined_parts.append("".join(current_turn_parts))
         elif not combined_parts and not current_turn_parts:
-            logger.info(f"[{req_id}] (准备提示) 跳过角色 {role} 在索引 {i} 的空消息 (且无工具调用)。")
+            logger.info(f"[{req_id}] (Prompt Preparation) Skipping empty message for role {role} at index {i} (and no tool calls).")
         elif len(current_turn_parts) == 1 and not combined_parts:
-            logger.info(f"[{req_id}] (准备提示) 跳过角色 {role} 在索引 {i} 的空消息 (只有前缀)。")
+            logger.info(f"[{req_id}] (Prompt Preparation) Skipping empty message for role {role} at index {i} (prefix only).")
     
     final_prompt = "".join(combined_parts)
     if final_prompt:
         final_prompt += "\n"
     
     preview_text = final_prompt[:300].replace('\n', '\\n')
-    logger.info(f"[{req_id}] (准备提示) 组合提示长度: {len(final_prompt)}，附件数量: {len(files_list)}。预览: '{preview_text}...'")
+    logger.info(f"[{req_id}] (Prompt Preparation) Combined prompt length: {len(final_prompt)}, attachments count: {len(files_list)}. Preview: '{preview_text}...'")
     
     return final_prompt, files_list
 

@@ -354,7 +354,7 @@ def input_with_timeout(prompt_message: str, timeout_seconds: int = 30) -> str:
         input_thread.start()
         input_thread.join(timeout=timeout_seconds)
         if input_thread.is_alive():
-            print("\n输入超时。将使用默认值。", flush=True)
+            print("\nInput timeout. Will use default value.", flush=True)
             return ""
         return user_input_container[0] if user_input_container[0] is not None else ""
     else: # Linux/macOS
@@ -362,7 +362,7 @@ def input_with_timeout(prompt_message: str, timeout_seconds: int = 30) -> str:
         if readable_fds:
             return sys.stdin.readline().strip()
         else:
-            print("\n输入超时。将使用默认值。", flush=True)
+            print("\nInput timeout. Will use default value.", flush=True)
             return ""
 
 def get_proxy_from_gsettings():
@@ -730,13 +730,13 @@ if __name__ == "__main__":
     # --- 交互式认证文件创建逻辑 ---
     if final_launch_mode == 'debug' and not args.active_auth_json:
         create_new_auth_choice = input_with_timeout(
-            "  是否要创建并保存新的认证文件? (y/n; 默认: n, 15s超时): ", 15
+            "Do you want to create and save a new authentication file? (y/n; default: n, 15s timeout): ", 15
         ).strip().lower()
         if create_new_auth_choice == 'y':
             new_auth_filename = ""
             while not new_auth_filename:
                 new_auth_filename_input = input_with_timeout(
-                    f"  请输入要保存的文件名 (不含.json后缀, 字母/数字/-/_): ", args.auth_save_timeout
+                    f"  Please enter the filename to save (without .json extension, letters/numbers/-/_): ", args.auth_save_timeout
                 ).strip()
                 # 简单的合法性校验
                 if re.match(r"^[a-zA-Z0-9_-]+$", new_auth_filename_input):

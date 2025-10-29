@@ -36,23 +36,23 @@ async def setup_disconnect_monitoring(req_id: str, http_request: Request, result
             try:
                 is_connected = await test_client_connection(req_id, http_request)
                 if not is_connected:
-                    logger.info(f"[{req_id}] 主动检测到客户端断开连接。")
+                    logger.info(f"[{req_id}] Proactively detected client disconnect.")
                     client_disconnected_event.set()
                     if not result_future.done():
-                        result_future.set_exception(HTTPException(status_code=499, detail=f"[{req_id}] 客户端关闭了请求"))
+                        result_future.set_exception(HTTPException(status_code=499, detail=f"[{req_id}] Client closed the request"))
                     break
 
                 if await http_request.is_disconnected():
-                    logger.info(f"[{req_id}] 备用检测到客户端断开连接。")
+                    logger.info(f"[{req_id}] Fallback detected client disconnect.")
                     client_disconnected_event.set()
                     if not result_future.done():
-                        result_future.set_exception(HTTPException(status_code=499, detail=f"[{req_id}] 客户端关闭了请求"))
+                        result_future.set_exception(HTTPException(status_code=499, detail=f"[{req_id}] Client closed the request"))
                     break
                 await asyncio.sleep(0.3)
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                logger.error(f"[{req_id}] (Disco Check Task) 错误: {e}")
+                logger.error(f"[{req_id}] (Disco Check Task) Error: {e}")
                 client_disconnected_event.set()
                 if not result_future.done():
                     result_future.set_exception(HTTPException(status_code=500, detail=f"[{req_id}] Internal disconnect checker error: {e}"))
@@ -62,10 +62,9 @@ async def setup_disconnect_monitoring(req_id: str, http_request: Request, result
 
     def check_client_disconnected(stage: str = ""):
         if client_disconnected_event.is_set():
-            logger.info(f"[{req_id}] 在 '{stage}' 检测到客户端断开连接。")
+            logger.info(f"[{req_id}] Detected client disconnect at '{stage}'.")
             from models import ClientDisconnectedError
             raise ClientDisconnectedError(f"[{req_id}] Client disconnected at stage: {stage}")
         return False
 
     return client_disconnected_event, disconnect_check_task, check_client_disconnected
-
