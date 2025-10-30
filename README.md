@@ -280,7 +280,7 @@ Using Open WebUI as an example:
 
 ---
 
-## External Control Endpoints (New chat / Click Run / Click Stop)
+## External Control Endpoints (New chat / Click Run / Click Stop / Scroll)
 
 These auxiliary endpoints allow triggering UI operations on the AI Studio page from external sources (create new session, click Run, click Stop). Only available when the browser and page have been successfully initialized.
 
@@ -393,6 +393,66 @@ curl -X POST http://127.0.0.1:2048/api/click-stop \
 ```
 
 - Usage suggestion: If you need to quickly abort generation when client disconnects or quota is reached, set `delay_ms` to 100–500ms to improve hit probability when in a stoppable state.
+
+### 4) Scroll to Top of Page
+
+- Method: POST
+- URL: `http://127.0.0.1:2048/api/scroll-to-top`
+- Request body: None
+- Success return:
+
+```json
+{"success": true, "message": "Scrolled to top of page."}
+```
+
+- Possible errors:
+  - `503 Browser page is not available`: Browser page unavailable/not connected
+  - `500 Failed to scroll to top`: Scroll operation failed
+
+- Example:
+
+PowerShell
+
+```powershell
+Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:2048/api/scroll-to-top" -ContentType "application/json"
+```
+
+curl
+
+```bash
+curl -X POST http://127.0.0.1:2048/api/scroll-to-top \
+  -H "Content-Type: application/json"
+```
+
+### 5) Scroll to Bottom of Page
+
+- Method: POST
+- URL: `http://127.0.0.1:2048/api/scroll-to-bottom`
+- Request body: None
+- Success return:
+
+```json
+{"success": true, "message": "Scrolled to bottom of page."}
+```
+
+- Possible errors:
+  - `503 Browser page is not available`: Browser page unavailable/not connected
+  - `500 Failed to scroll to bottom`: Scroll operation failed
+
+- Example:
+
+PowerShell
+
+```powershell
+Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:2048/api/scroll-to-bottom" -ContentType "application/json"
+```
+
+curl
+
+```bash
+curl -X POST http://127.0.0.1:2048/api/scroll-to-bottom \
+  -H "Content-Type: application/json"
+```
 
 ---
 

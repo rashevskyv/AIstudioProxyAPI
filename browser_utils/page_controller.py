@@ -1339,3 +1339,37 @@ class PageController:
             if not isinstance(e, ClientDisconnectedError):
                 await save_error_snapshot(f"get_response_error_{self.req_id}")
             raise
+
+    async def scroll_to_top(self, check_client_disconnected: Callable):
+        """Scroll to the top of the page using Ctrl+Home."""
+        self.logger.info(f"[{self.req_id}] Scrolling to top of page...")
+        try:
+            await self._check_disconnect(check_client_disconnected, "Before scroll to top")
+            
+            # Press Ctrl+Home to scroll to top
+            await self.page.keyboard.press('Control+Home')
+            await asyncio.sleep(0.5)  # Wait for scroll to complete
+            
+            self.logger.info(f"[{self.req_id}] ✅ Successfully scrolled to top of page")
+            
+        except Exception as e:
+            self.logger.error(f"[{self.req_id}] ❌ Error scrolling to top: {e}")
+            if isinstance(e, ClientDisconnectedError):
+                raise
+
+    async def scroll_to_bottom(self, check_client_disconnected: Callable):
+        """Scroll to the bottom of the page using Ctrl+End."""
+        self.logger.info(f"[{self.req_id}] Scrolling to bottom of page...")
+        try:
+            await self._check_disconnect(check_client_disconnected, "Before scroll to bottom")
+            
+            # Press Ctrl+End to scroll to bottom
+            await self.page.keyboard.press('Control+End')
+            await asyncio.sleep(0.5)  # Wait for scroll to complete
+            
+            self.logger.info(f"[{self.req_id}] ✅ Successfully scrolled to bottom of page")
+            
+        except Exception as e:
+            self.logger.error(f"[{self.req_id}] ❌ Error scrolling to bottom: {e}")
+            if isinstance(e, ClientDisconnectedError):
+                raise

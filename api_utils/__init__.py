@@ -19,7 +19,9 @@ from .routers import (
     chat_completions,
     cancel_request,
     get_queue_status,
-    websocket_log_endpoint
+    websocket_log_endpoint,
+    scroll_to_top_endpoint,
+    scroll_to_bottom_endpoint
 )
 
 # 工具函数
@@ -60,6 +62,8 @@ __all__ = [
     'cancel_request',
     'get_queue_status',
     'websocket_log_endpoint',
+    'scroll_to_top_endpoint',
+    'scroll_to_bottom_endpoint',
     # 工具函数
     'generate_sse_chunk',
     'generate_sse_stop_chunk',

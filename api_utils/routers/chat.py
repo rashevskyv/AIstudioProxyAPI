@@ -116,3 +116,51 @@ async def click_stop_endpoint(
         logger.info(f"[{req_id}] ACTION-SUCCESS: Stop clicked (delay_ms={delay_ms})")
         return JSONResponse(content={"success": True, "message": "Stop clicked.", "delay_ms": delay_ms})
     raise HTTPException(status_code=500, detail="Failed to click Stop.")
+
+
+async def scroll_to_top_endpoint(
+    page_instance = Depends(get_page_instance),
+    logger: logging.Logger = Depends(get_logger)
+) -> JSONResponse:
+    req_id = ''.join(random.choices('abcdefghijklmnopqrstuvwxyz0123456789', k=7))
+    logger.info(f"[{req_id}] ACTION: /api/scroll-to-top requested (scroll to top)")
+    if not page_instance or page_instance.is_closed():
+        raise HTTPException(status_code=503, detail="Browser page is not available.")
+    
+    # Import PageController here to avoid circular imports
+    from browser_utils.page_controller import PageController
+    
+    # Create a temporary PageController instance to use its methods
+    page_controller = PageController(page_instance, logger, req_id)
+    
+    # Use a dummy check_client_disconnected function
+    async def check_client_disconnected(stage: str) -> bool:
+        return False
+    
+    await page_controller.scroll_to_top(check_client_disconnected)
+    logger.info(f"[{req_id}] ACTION-SUCCESS: Scrolled to top of page")
+    return JSONResponse(content={"success": True, "message": "Scrolled to top of page."})
+
+
+async def scroll_to_bottom_endpoint(
+    page_instance = Depends(get_page_instance),
+    logger: logging.Logger = Depends(get_logger)
+) -> JSONResponse:
+    req_id = ''.join(random.choices('abcdefghijklmnopqrstuvwxyz0123456789', k=7))
+    logger.info(f"[{req_id}] ACTION: /api/scroll-to-bottom requested (scroll to bottom)")
+    if not page_instance or page_instance.is_closed():
+        raise HTTPException(status_code=503, detail="Browser page is not available.")
+    
+    # Import PageController here to avoid circular imports
+    from browser_utils.page_controller import PageController
+    
+    # Create a temporary PageController instance to use its methods
+    page_controller = PageController(page_instance, logger, req_id)
+    
+    # Use a dummy check_client_disconnected function
+    async def check_client_disconnected(stage: str) -> bool:
+        return False
+    
+    await page_controller.scroll_to_bottom(check_client_disconnected)
+    logger.info(f"[{req_id}] ACTION-SUCCESS: Scrolled to bottom of page")
+    return JSONResponse(content={"success": True, "message": "Scrolled to bottom of page."})

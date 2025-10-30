@@ -309,7 +309,8 @@ def create_app() -> FastAPI:
         read_index, get_css, get_js, get_api_info,
         health_check, list_models, chat_completions, new_chat_endpoint, click_run_endpoint, click_stop_endpoint,
         cancel_request, get_queue_status, websocket_log_endpoint,
-        get_api_keys, add_api_key, test_api_key, delete_api_key
+        get_api_keys, add_api_key, test_api_key, delete_api_key,
+        scroll_to_top_endpoint, scroll_to_bottom_endpoint
     )
     from fastapi.responses import FileResponse
     
@@ -326,6 +327,8 @@ def create_app() -> FastAPI:
     app.post("/v1/cancel/{req_id}")(cancel_request)
     app.get("/v1/queue")(get_queue_status)
     app.websocket("/ws/logs")(websocket_log_endpoint)
+    app.post("/api/scroll-to-top")(scroll_to_top_endpoint)
+    app.post("/api/scroll-to-bottom")(scroll_to_bottom_endpoint)
 
     # API密钥管理端点
     app.get("/api/keys")(get_api_keys)
