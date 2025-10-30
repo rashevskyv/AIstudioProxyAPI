@@ -14,7 +14,7 @@ from config import (
     CLEAR_CHAT_BUTTON_SELECTOR, CLEAR_CHAT_CONFIRM_BUTTON_SELECTOR, OVERLAY_SELECTOR,
     PROMPT_TEXTAREA_SELECTOR, RESPONSE_CONTAINER_SELECTOR, RESPONSE_TEXT_SELECTOR,
     EDIT_MESSAGE_BUTTON_SELECTOR,USE_URL_CONTEXT_SELECTOR,UPLOAD_BUTTON_SELECTOR,
-    SET_THINKING_BUDGET_TOGGLE_SELECTOR, THINKING_BUDGET_INPUT_SELECTOR,
+    ENABLE_THINKING_MODE_TOGGLE_SELECTOR, SET_THINKING_BUDGET_TOGGLE_SELECTOR, THINKING_BUDGET_INPUT_SELECTOR,
     GROUNDING_WITH_GOOGLE_SEARCH_TOGGLE_SELECTOR
 )
 from config import (
@@ -25,6 +25,7 @@ from config import (
 from models import ClientDisconnectedError
 from .operations import save_error_snapshot, _wait_for_response_completion, _get_final_response_content
 from .initialization import enable_temporary_chat_mode
+from .thinking_normalizer import normalize_reasoning_effort, format_directive_log
 
 class PageController:
     """Encapsulates all interactions with the AI Studio page."""
@@ -80,67 +81,69 @@ class PageController:
         await self._adjust_google_search(request_params, check_client_disconnected)
 
     async def _handle_thinking_budget(self, request_params: Dict[str, Any], check_client_disconnected: Callable):
-        """Adjust thinking budget according to reasoning_effort."""
+        """Handle the adjustment logic for thinking mode and budget.
+
+        Use the normalization module to convert reasoning_effort into standard directives, then control based on the directives:
+        1. Main thinking switch (master switch)
+        2. Manual budget switch
+        3. Budget value input box
+        """
         reasoning_effort = request_params.get('reasoning_effort')
 
-        # Check whether user explicitly disabled thinking budget
-        should_disable_budget = isinstance(reasoning_effort, str) and reasoning_effort.lower() == 'none'
+        # Standardize parameters using the normalization module
+        directive = normalize_reasoning_effort(reasoning_effort)
+        self.logger.info(f"[{self.req_id}] Thinking mode directive: {format_directive_log(directive)}")
 
-        if should_disable_budget:
-            self.logger.info(f"[{self.req_id}] User disabled thinking budget via reasoning_effort='none'.")
-            await self._control_thinking_budget_toggle(should_be_checked=False, check_client_disconnected=check_client_disconnected)
-        elif reasoning_effort is not None:
-            # User specified a non-'none' value; enable and set
-            self.logger.info(f"[{self.req_id}] User specified reasoning_effort: {reasoning_effort}; enabling and setting thinking budget.")
-            await self._control_thinking_budget_toggle(should_be_checked=True, check_client_disconnected=check_client_disconnected)
-            await self._adjust_thinking_budget(reasoning_effort, check_client_disconnected)
-        else:
-            # User didn't specify; use default config
-            self.logger.info(f"[{self.req_id}] User didn't specify reasoning_effort; using default ENABLE_THINKING_BUDGET: {ENABLE_THINKING_BUDGET}.")
-            await self._control_thinking_budget_toggle(should_be_checked=ENABLE_THINKING_BUDGET, check_client_disconnected=check_client_disconnected)
-            if ENABLE_THINKING_BUDGET:
-                # If default enabled, use default value
-                await self._adjust_thinking_budget(None, check_client_disconnected)
+        # Scenario 1: Turn off thinking mode
+        if not directive.thinking_enabled:
+            self.logger.info(f"[{self.req_id}] Attempting to turn off the main thinking switch...")
+            success = await self._control_thinking_mode_toggle(
+                should_be_enabled=False,
+                check_client_disconnected=check_client_disconnected
+            )
 
-    def _parse_thinking_budget(self, reasoning_effort: Optional[Any]) -> Optional[int]:
-        """Parse token_budget from reasoning_effort."""
-        token_budget = None
-        if reasoning_effort is None:
-            token_budget = DEFAULT_THINKING_BUDGET
-            self.logger.info(f"[{self.req_id}] 'reasoning_effort' is None; using default thinking budget: {token_budget}")
-        elif isinstance(reasoning_effort, int):
-            token_budget = reasoning_effort
-        elif isinstance(reasoning_effort, str):
-            if reasoning_effort.lower() == 'none':
-                token_budget = DEFAULT_THINKING_BUDGET
-                self.logger.info(f"[{self.req_id}] 'reasoning_effort' is 'none' string; using default thinking budget: {token_budget}")
-            else:
-                effort_map = {
-                    "low": 1000,
-                    "medium": 8000,
-                    "high": 24000
-                }
-                token_budget = effort_map.get(reasoning_effort.lower())
-                if token_budget is None:
-                    try:
-                        token_budget = int(reasoning_effort)
-                    except (ValueError, TypeError):
-                        pass # token_budget remains None
-        
-        if token_budget is None:
-             self.logger.warning(f"[{self.req_id}] Could not parse a valid token_budget from '{reasoning_effort}' (type: {type(reasoning_effort)}).")
-
-        return token_budget
-
-    async def _adjust_thinking_budget(self, reasoning_effort: Optional[Any], check_client_disconnected: Callable):
-        """Adjust thinking budget according to reasoning_effort."""
-        self.logger.info(f"[{self.req_id}] Checking and adjusting thinking budget, input: {reasoning_effort}")
-        
-        token_budget = self._parse_thinking_budget(reasoning_effort)
-
-        if token_budget is None:
-            self.logger.warning(f"[{self.req_id}] Invalid reasoning_effort value: '{reasoning_effort}'. Skipping.")
+            if not success:
+                # Fallback plan: Main switch is unavailable, try setting the budget to 0
+                self.logger.warning(f"[{self.req_id}] Main thinking switch is unavailable, using fallback plan: set budget to 0")
+                await self._control_thinking_budget_toggle(
+                    should_be_checked=True,
+                    check_client_disconnected=check_client_disconnected
+                )
+                await self._set_thinking_budget_value(0, check_client_disconnected)
             return
+
+        # Scenarios 2 and 3: Turn on thinking mode
+        self.logger.info(f"[{self.req_id}] Turning on the main thinking switch...")
+        await self._control_thinking_mode_toggle(
+            should_be_enabled=True,
+            check_client_disconnected=check_client_disconnected
+        )
+
+        # Scenario 2: Turn on thinking, no budget limit
+        if not directive.budget_enabled:
+            self.logger.info(f"[{self.req_id}] Turning off manual budget limit...")
+            await self._control_thinking_budget_toggle(
+                should_be_checked=False,
+                check_client_disconnected=check_client_disconnected
+            )
+
+        # Scenario 3: Turn on thinking, with budget limit
+        else:
+            self.logger.info(f"[{self.req_id}] Turning on manual budget limit and setting the budget value: {directive.budget_value} tokens")
+            await self._control_thinking_budget_toggle(
+                should_be_checked=True,
+                check_client_disconnected=check_client_disconnected
+            )
+            await self._set_thinking_budget_value(directive.budget_value, check_client_disconnected)
+
+    async def _set_thinking_budget_value(self, token_budget: int, check_client_disconnected: Callable):
+        """Set the specific value for the thinking budget.
+
+        Parameters:
+            token_budget: The number of budget tokens (calculated by the normalization module)
+            check_client_disconnected: Callback for checking client disconnection
+        """
+        self.logger.info(f"[{self.req_id}] Setting thinking budget value: {token_budget} tokens")
 
         budget_input_locator = self.page.locator(THINKING_BUDGET_INPUT_SELECTOR)
         
@@ -265,6 +268,67 @@ class PageController:
             self.logger.error(f"[{self.req_id}] ❌ Error operating USE_URL_CONTEXT_SELECTOR: {e}.")
             if isinstance(e, ClientDisconnectedError):
                 raise
+
+    async def _control_thinking_mode_toggle(self, should_be_enabled: bool, check_client_disconnected: Callable) -> bool:
+        """
+        Control the main thinking mode toggle (master switch) to enable or disable thinking mode.
+
+        Parameters:
+            should_be_enabled: Expected toggle state (True=enable, False=disable)
+            check_client_disconnected: Client disconnect detection function
+
+        Returns:
+            bool: Whether successfully set to expected state (returns False if toggle doesn't exist or is disabled)
+        """
+        toggle_selector = ENABLE_THINKING_MODE_TOGGLE_SELECTOR
+        self.logger.info(f"[{self.req_id}] Controlling main thinking toggle; expected state: {'enable' if should_be_enabled else 'disable'}...")
+
+        try:
+            toggle_locator = self.page.locator(toggle_selector)
+
+            # Wait for element to be visible (5s timeout)
+            await expect_async(toggle_locator).to_be_visible(timeout=5000)
+            await self._check_disconnect(check_client_disconnected, "Main thinking toggle - after element visible")
+
+            # Check current state
+            is_checked_str = await toggle_locator.get_attribute("aria-checked")
+            current_state_is_enabled = is_checked_str == "true"
+            self.logger.info(f"[{self.req_id}] Main thinking toggle current state: {is_checked_str} (enabled: {current_state_is_enabled})")
+
+            # If current state differs from expected, click to toggle
+            if current_state_is_enabled != should_be_enabled:
+                action = "enable" if should_be_enabled else "disable"
+                self.logger.info(f"[{self.req_id}] Main thinking toggle needs switching; clicking to {action} thinking mode...")
+
+                await toggle_locator.click(timeout=CLICK_TIMEOUT_MS)
+                await self._check_disconnect(check_client_disconnected, f"Main thinking toggle - after click to {action}")
+
+                # Wait for state update
+                await asyncio.sleep(0.5)
+
+                # Verify new state
+                new_state_str = await toggle_locator.get_attribute("aria-checked")
+                new_state_is_enabled = new_state_str == "true"
+
+                if new_state_is_enabled == should_be_enabled:
+                    self.logger.info(f"[{self.req_id}] ✅ Main thinking toggle successfully {action}d. New state: {new_state_str}")
+                    return True
+                else:
+                    self.logger.warning(f"[{self.req_id}] ⚠️ Main thinking toggle verification failed after {action}. Expected: {should_be_enabled}, actual: {new_state_str}")
+                    return False
+            else:
+                self.logger.info(f"[{self.req_id}] Main thinking toggle already in expected state; no action needed.")
+                return True
+
+        except TimeoutError:
+            self.logger.warning(f"[{self.req_id}] ⚠️ Main thinking toggle element not found or not visible (current model may not support thinking mode)")
+            return False
+        except Exception as e:
+            self.logger.error(f"[{self.req_id}] ❌ Error operating main thinking toggle: {e}")
+            await save_error_snapshot(f"thinking_mode_toggle_error_{self.req_id}")
+            if isinstance(e, ClientDisconnectedError):
+                raise
+            return False
 
     async def _control_thinking_budget_toggle(self, should_be_checked: bool, check_client_disconnected: Callable):
         """
@@ -916,7 +980,7 @@ class PageController:
                 raise
 
             await self._check_disconnect(check_client_disconnected, "After Submit Button Enabled")
-            self.logger.info(f"[{self.req_id}] Delaying 3s before clicking Run (1/2)...")
+            self.logger.info(f"[{self.req_id}] Delaying 3s before clicking Run...")
             await asyncio.sleep(3.0)
             try:
                 await self._handle_post_upload_dialog()

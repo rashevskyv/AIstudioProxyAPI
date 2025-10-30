@@ -113,6 +113,43 @@ source venv/bin/activate  # Linux/macOS
 
 - 或修改 [`launch_camoufox.py`](../launch_camoufox.py) 的 `--server-port` 参数。
 
+### Camoufox 启动时 proxy 错误
+
+**问题现象**: 未配置代理环境变量时，Camoufox 启动失败：
+
+```
+Error: proxy: expected object, got null
+```
+
+**原因**: Camoufox 0.4.11 的 utils.py 会无条件传递 proxy 参数给 Playwright，即使值为 None。
+
+**修复方法**: 修改 Camoufox 源码文件：
+
+```
+/usr/local/lib/python3.10/site-packages/camoufox/utils.py
+```
+
+在 `launch_options` 函数中，将：
+
+```python
+return {
+    ...
+    "proxy": proxy,
+    ...
+}
+```
+
+改为：
+
+```python
+result = {
+    ...  # 删除 "proxy": proxy,其他配置保持不变
+}
+if proxy is not None:
+    result["proxy"] = proxy
+return result
+```
+
 ## 认证相关问题
 
 ### 认证失败 (特别是无头模式)

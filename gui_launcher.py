@@ -18,7 +18,7 @@ import json
 import requests # 新增导入
 from dotenv import load_dotenv
 
-# 加载 .env 文件
+# Load .env file
 load_dotenv()
 
 # --- Configuration & Globals ---
@@ -27,7 +27,7 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 LAUNCH_CAMOUFOX_PY = os.path.join(SCRIPT_DIR, "launch_camoufox.py")
 SERVER_PY_FILENAME = "server.py" # For context
 
-AUTH_PROFILES_DIR = os.path.join(SCRIPT_DIR, "auth_profiles") # 确保这些目录存在
+AUTH_PROFILES_DIR = os.path.join(SCRIPT_DIR, "auth_profiles") # Ensure these directories exist
 ACTIVE_AUTH_DIR = os.path.join(AUTH_PROFILES_DIR, "active")
 SAVED_AUTH_DIR = os.path.join(AUTH_PROFILES_DIR, "saved")
 
@@ -41,15 +41,15 @@ managed_process_info: Dict[str, Any] = {
     "stdout_thread": None,
     "stderr_thread": None,
     "output_area": None,
-    "fully_detached": False # 新增：标记进程是否完全独立
+    "fully_detached": False # New: Mark whether process is completely independent
 }
 
-# 添加按钮防抖机制
+# Add button debounce mechanism
 button_debounce_info: Dict[str, float] = {}
 
 def debounce_button(func_name: str, delay_seconds: float = 2.0):
     """
-    按钮防抖装饰器，防止在指定时间内重复执行同一函数
+    Button debounce decorator to prevent repeated execution of the same function within the specified time
     """
     def decorator(func):
         def wrapper(*args, **kwargs):
@@ -58,7 +58,7 @@ def debounce_button(func_name: str, delay_seconds: float = 2.0):
             last_call_time = button_debounce_info.get(func_name, 0)
 
             if current_time - last_call_time < delay_seconds:
-                logger.info(f"按钮防抖：忽略 {func_name} 的重复调用")
+                logger.info(f"Button debounce: ignoring repeated call of {func_name}")
                 return
 
             button_debounce_info[func_name] = current_time
@@ -66,7 +66,7 @@ def debounce_button(func_name: str, delay_seconds: float = 2.0):
         return wrapper
     return decorator
 
-# 添加全局logger定义
+# Add global logger definition
 logger = logging.getLogger("GUILauncher")
 logger.setLevel(logging.INFO)
 console_handler = logging.StreamHandler()
@@ -77,7 +77,7 @@ file_handler = logging.FileHandler(os.path.join(SCRIPT_DIR, "logs", "gui_launche
 file_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
 logger.addHandler(file_handler)
 
-# 在LANG_TEXTS声明之前定义长文本
+# Define long text before LANG_TEXTS declaration
 service_closing_guide_message_zh = """由于服务在独立终端中运行，您可以通过以下方式关闭服务：
 
 1. 使用端口管理功能:
@@ -157,7 +157,7 @@ LANG_TEXTS = {
     "no_service_running_status": {"zh": "当前没有GUI管理的服务在运行。", "en": "No GUI-managed service is currently running."},
     "stopping_initiated_status": {"zh": "{service_name} (PID: {pid}) 停止已启动。最终状态待定。", "en": "{service_name} (PID: {pid}) stopping initiated. Final status pending."},
     "service_name_headed_interactive": {"zh": "有头交互服务", "en": "Headed Interactive Service"},
-    "service_name_headless": {"zh": "无头服务", "en": "Headless Service"}, # Key 修改
+    "service_name_headless": {"zh": "无头服务", "en": "Headless Service"}, # Key modified
     "service_name_virtual_display": {"zh": "虚拟显示无头服务", "en": "Virtual Display Headless Service"},
     "status_headed_launch": {"zh": "有头模式：启动中，请关注新控制台的提示...", "en": "Headed Mode: Launching, check new console for prompts..."},
     "status_headless_launch": {"zh": "无头服务：启动中...新的独立终端将打开。", "en": "Headless Service: Launching... A new independent terminal will open."},
@@ -295,19 +295,19 @@ LANG_TEXTS = {
     "save_now_btn": {"zh": "立即保存", "en": "Save Now"}
 }
 
-# 删除重复的定义
+# Delete duplicate definitions
 current_language = 'en'
 root_widget: Optional[tk.Tk] = None
 process_status_text_var: Optional[tk.StringVar] = None
-port_entry_var: Optional[tk.StringVar] = None # 将用于 FastAPI 端口
+port_entry_var: Optional[tk.StringVar] = None # Will be used for FastAPI port
 camoufox_debug_port_var: Optional[tk.StringVar] = None
 pid_listbox_widget: Optional[tk.Listbox] = None
 custom_pid_entry_var: Optional[tk.StringVar] = None
 widgets_to_translate: List[Dict[str, Any]] = []
-proxy_address_var: Optional[tk.StringVar] = None  # 添加变量存储代理地址
-proxy_enabled_var: Optional[tk.BooleanVar] = None  # 添加变量标记代理是否启用
-active_auth_file_display_var: Optional[tk.StringVar] = None # 用于显示当前认证文件
-g_config: Dict[str, Any] = {} # 新增：用于存储加载的配置
+proxy_address_var: Optional[tk.StringVar] = None  # Add variable to store proxy address
+proxy_enabled_var: Optional[tk.BooleanVar] = None  # Add variable to mark whether proxy is enabled
+active_auth_file_display_var: Optional[tk.StringVar] = None # Used to display current authentication file
+g_config: Dict[str, Any] = {} # New: Used to store loaded configuration
 
 LLM_PY_FILENAME = "llm.py"
 llm_service_process_info: Dict[str, Any] = {
@@ -318,7 +318,7 @@ llm_service_process_info: Dict[str, Any] = {
     "service_name_key": "llm_service_name_key" # Corresponds to a LANG_TEXTS key
 }
 
-# 将所有辅助函数定义移到 build_gui 之前
+# Move all auxiliary function definitions before build_gui
 
 def get_text(key: str, **kwargs) -> str:
     try:
@@ -533,7 +533,7 @@ def check_all_required_ports(ports_to_check: List[Tuple[int, str]]) -> bool:
     occupied_ports_details_for_msg = []
     for info in occupied_ports_info:
         port_display_name = get_text(f"port_name_{info['name_key']}") if info['name_key'] else ""
-        occupied_ports_details_for_msg.append(f"  - {port_display_name} (端口 {info['port']}): 被 PID(s) {info['pids_str']} 占用")
+        occupied_ports_details_for_msg.append(f"  - {port_display_name} (port {info['port']}): occupied by PID(s) {info['pids_str']}")
 
     details_str = "\n".join(occupied_ports_details_for_msg)
 
@@ -600,9 +600,7 @@ def check_all_required_ports(ports_to_check: List[Tuple[int, str]]) -> bool:
         return False
 
 def _update_active_auth_display():
-    """更新GUI中显示的当前活动认证文件"""
-    if not active_auth_file_display_var or not root_widget:
-        return
+    """Update current active authentication file display in GUI"""
 
     active_files = [f for f in os.listdir(ACTIVE_AUTH_DIR) if f.lower().endswith('.json')]
     if active_files:
@@ -758,24 +756,24 @@ def build_launch_command(mode, fastapi_port, camoufox_debug_port, stream_port_en
     else:
         cmd.extend(["--helper", ""]) # 显式传递空字符串表示禁用
 
-    # 修复：添加统一代理配置参数传递
-    # 使用 --internal-camoufox-proxy 参数确保最高优先级，而不是仅依赖环境变量
+    # Fix: Add unified proxy configuration parameter passing
+    # Use --internal-camoufox-proxy parameter to ensure highest priority instead of relying only on environment variables
     if proxy_enabled_var.get():
         proxy_addr = proxy_address_var.get().strip()
         if proxy_addr:
             cmd.extend(["--internal-camoufox-proxy", proxy_addr])
-            logger.info(f"将使用GUI配置的代理: {proxy_addr}")
+            logger.info(f"Will use GUI configured proxy: {proxy_addr}")
         else:
             cmd.extend(["--internal-camoufox-proxy", ""])
-            logger.info("GUI代理已启用但地址为空，明确禁用代理")
+            logger.info("GUI proxy enabled but address is empty, explicitly disabling proxy")
     else:
         cmd.extend(["--internal-camoufox-proxy", ""])
-        logger.info("GUI代理未启用，明确禁用代理")
+        logger.info("GUI proxy not enabled, explicitly disabling proxy")
 
     return cmd
 
-# --- GUI构建与主逻辑区段的函数定义 ---
-# (这些函数调用上面定义的辅助函数，所以它们的定义顺序很重要)
+# --- GUI construction and main logic section function definitions ---
+# (These functions call auxiliary functions defined above, so their definition order is important)
 
 def enqueue_stream_output(stream, stream_name_prefix):
     try:
@@ -861,7 +859,7 @@ def get_camoufox_debug_port_from_gui() -> int:
 # 配置文件路径
 CONFIG_FILE_PATH = os.path.join(SCRIPT_DIR, "gui_config.json")
 
-# 默认配置 - 从环境变量读取，如果没有则使用硬编码默认值
+# Default configuration - read from environment variables, use hardcoded defaults if not available
 DEFAULT_CONFIG = {
     "fastapi_port": DEFAULT_FASTAPI_PORT,
     "camoufox_debug_port": DEFAULT_CAMOUFOX_PORT_GUI,
@@ -1075,7 +1073,7 @@ def _launch_process_gui(cmd: List[str], service_name_key: str, env_vars: Optiona
 
         args_for_script_quoted = [shlex.quote(arg) for arg in cmd[2:]]
 
-        # 构建环境变量设置字符串
+        # Build environment variable setting string
         env_prefix_parts = []
         if env_vars: # env_vars 应该是从 _configure_proxy_env_vars() 来的 proxy_env
             for key, value in env_vars.items():
@@ -1103,8 +1101,8 @@ def _launch_process_gui(cmd: List[str], service_name_key: str, env_vars: Optiona
         applescript_arg_escaped = shell_command_str.replace('\\\\', '\\\\\\\\').replace('\"', '\\\\\"')
 
         # Construct the AppleScript command
-        # 修复：使用简化的AppleScript命令避免AppleEvent处理程序失败
-        # 直接创建新窗口并执行命令，避免复杂的条件判断
+        # Fix: Use simplified AppleScript command to avoid AppleEvent handler failure
+        # Directly create new window and execute command, avoiding complex conditional judgments
         applescript_command = f'''
         tell application "Terminal"
             do script "{applescript_arg_escaped}"
@@ -1273,7 +1271,7 @@ def create_new_auth_file_gui(parent_window):
             parent_window.destroy()
             launch_params = _get_launch_parameters()
             if not launch_params:
-                logger.error("无法获取启动参数。")
+                logger.error("Cannot get launch parameters.")
                 return
             if port_auto_check_var.get():
                 if not check_all_required_ports([(launch_params["camoufox_debug_port"], "camoufox_debug")]):
@@ -1378,7 +1376,7 @@ def is_llm_service_running() -> bool:
            llm_service_process_info["popen"].poll() is None
 
 def monitor_llm_process_thread_target():
-    """监控LLM服务进程，捕获输出并更新状态"""
+    """Monitor LLM service process, capture output and update status"""
     popen = llm_service_process_info.get("popen")
     service_name_key = llm_service_process_info.get("service_name_key") # "llm_service_name_key"
     output_area = managed_process_info.get("output_area") # Use the main output area
@@ -1421,7 +1419,7 @@ def monitor_llm_process_thread_target():
         llm_service_process_info["stderr_thread"] = None
 
 def _actually_launch_llm_service():
-    """实际启动 llm.py 脚本"""
+    """Actually start the llm.py script"""
     global llm_service_process_info
     service_name_key = "llm_service_name_key"
     service_name = get_text(service_name_key)
@@ -1881,7 +1879,7 @@ def stop_selected_pid_from_list_gui():
         if normal_kill_success:
             messagebox.showinfo(get_text("info_title"), get_text("terminate_request_sent", pid=pid_to_stop, name=process_name_to_stop), parent=root_widget)
         else:
-            # 普通权限停止失败，询问是否尝试管理员权限
+            # Normal permission stop failed, ask whether to try admin privileges
             if messagebox.askyesno(get_text("confirm_stop_pid_admin_title"),
                                get_text("confirm_stop_pid_admin_message", pid=pid_to_stop, name=process_name_to_stop),
                                parent=root_widget):
@@ -1948,7 +1946,7 @@ def kill_process_pid_admin(pid: int) -> bool:
                     logger.info(f"Terminal command result: rc={result.returncode}")
                     success = result.returncode == 0
                 else:
-                    # 如果找不到终端模拟器，尝试直接使用sudo
+                    # If no terminal emulator found, try to use sudo directly
                     logger.warning("No terminal emulator found; attempting direct sudo (may require existing sudo perms)")
                     result = subprocess.run(["sudo", "kill", "-9", str(pid)], capture_output=True, text=True)
                     logger.info(f"Direct sudo result: rc={result.returncode}, out={result.stdout}, err={result.stderr}")
@@ -1977,7 +1975,7 @@ def kill_custom_pid_gui():
         if normal_kill_success:
             messagebox.showinfo(get_text("info_title"), get_text("terminate_request_sent", pid=pid_to_kill, name=process_name_to_kill), parent=root_widget)
         else:
-            # 普通权限停止失败，询问是否尝试管理员权限
+            # Normal permission stop failed, ask whether to try admin privileges
             if messagebox.askyesno(get_text("confirm_stop_pid_admin_title"),
                                 get_text("confirm_stop_pid_admin_message", pid=pid_to_kill, name=process_name_to_kill),
                                 parent=root_widget):
@@ -1985,7 +1983,7 @@ def kill_custom_pid_gui():
                 if admin_kill_success:
                     messagebox.showinfo(get_text("info_title"), get_text("admin_stop_success", pid=pid_to_kill), parent=root_widget)
                 else:
-                    messagebox.showwarning(get_text("warning_title"), get_text("admin_stop_failure", pid=pid_to_kill, error="未知错误"), parent=root_widget)
+                    messagebox.showwarning(get_text("warning_title"), get_text("admin_stop_failure", pid=pid_to_kill, error="unknown error"), parent=root_widget)
             else:
                 messagebox.showwarning(get_text("warning_title"), get_text("terminate_attempt_failed", pid=pid_to_kill, name=process_name_to_kill), parent=root_widget)
         custom_pid_entry_var.set("")
@@ -2049,12 +2047,12 @@ def build_gui(root: tk.Tk):
     port_auto_check_var = tk.BooleanVar(value=True)
     proxy_address_var = tk.StringVar(value=g_config.get("proxy_address", "http://127.0.0.1:7890"))
     proxy_enabled_var = tk.BooleanVar(value=g_config.get("proxy_enabled", False))
-    active_auth_file_display_var = tk.StringVar() # 初始化为空，后续由 _update_active_auth_display 更新
+    active_auth_file_display_var = tk.StringVar() # Initialize as empty, will be updated later by _update_active_auth_display
 
-    # 联动逻辑：移除强制启用代理的逻辑，现在代理配置更加灵活
-    # 用户可以根据需要独立配置流式代理和浏览器代理
+    # Linkage logic: Remove forced proxy enable logic, now proxy configuration is more flexible
+    # Users can independently configure stream proxy and browser proxy as needed
     def on_stream_proxy_toggle(*args):
-        # 不再强制启用代理，用户可以自由选择
+        # No longer force enable proxy, users can freely choose
         pass
     stream_port_enabled_var.trace_add("write", on_stream_proxy_toggle)
 
@@ -2066,29 +2064,29 @@ def build_gui(root: tk.Tk):
     menu_bar_ref.add_cascade(label="Language", menu=lang_menu)
     root.config(menu=menu_bar_ref)
 
-    # --- 主 PanedWindow 实现三栏 ---
+    # --- Main PanedWindow implementing three columns ---
     main_paned_window = ttk.PanedWindow(root, orient=tk.HORIZONTAL)
     main_paned_window.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
 
-    # --- 左栏 Frame ---
+    # --- Left column Frame ---
     left_frame_container = ttk.Frame(main_paned_window, padding="5")
-    main_paned_window.add(left_frame_container, weight=3) # 增大左栏初始权重
+    main_paned_window.add(left_frame_container, weight=3) # Increase left column initial weight
     left_frame_container.columnconfigure(0, weight=1)
-    # 配置行权重，使得launch_options_frame和auth_section之间可以有空白，或者让它们紧凑排列
-    # 假设 port_section, launch_options_frame, auth_section 依次排列
+    # Configure row weights, allowing space between launch_options_frame and auth_section, or making them compact
+    # Assume port_section, launch_options_frame, auth_section are arranged in order
     left_frame_container.rowconfigure(0, weight=0) # port_section
     left_frame_container.rowconfigure(1, weight=0) # launch_options_frame
     left_frame_container.rowconfigure(2, weight=0) # auth_section (移到此处后)
-    left_frame_container.rowconfigure(3, weight=1) # 添加一个占位符Frame，使其填充剩余空间
+    left_frame_container.rowconfigure(3, weight=1) # Add a placeholder Frame to fill remaining space
 
     left_current_row = 0
-    # 端口配置部分
+    # Port configuration section
     port_section = ttk.LabelFrame(left_frame_container, text="")
     port_section.grid(row=left_current_row, column=0, sticky="ew", padx=2, pady=(2,10))
     widgets_to_translate.append({"widget": port_section, "key": "port_section_label", "property": "text"})
     left_current_row += 1
 
-    # 添加重置按钮和服务关闭指南按钮
+    # Add reset button and service closing guide button
     port_controls_frame = ttk.Frame(port_section)
     port_controls_frame.pack(fill=tk.X, padx=5, pady=3)
     btn_reset = ttk.Button(port_controls_frame, text="", command=reset_to_defaults)
@@ -2151,14 +2149,14 @@ def build_gui(root: tk.Tk):
     proxy_section.pack(fill=tk.X, padx=5, pady=(5,8))
     widgets_to_translate.append({"widget": proxy_section, "key": "proxy_section_label", "property": "text"})
 
-    # 代理启用复选框
+    # Proxy enable checkbox
     proxy_enable_frame = ttk.Frame(proxy_section)
     proxy_enable_frame.pack(fill=tk.X, padx=5, pady=(5,3))
     proxy_checkbox = ttk.Checkbutton(proxy_enable_frame, variable=proxy_enabled_var, text="")
     proxy_checkbox.pack(side=tk.LEFT)
     widgets_to_translate.append({"widget": proxy_checkbox, "key": "enable_proxy_label", "property": "text"})
 
-    # 代理地址输入
+    # Proxy address input
     proxy_address_frame = ttk.Frame(proxy_section)
     proxy_address_frame.pack(fill=tk.X, padx=5, pady=(0,5))
     lbl_proxy_address = ttk.Label(proxy_address_frame, text="")
@@ -2167,7 +2165,7 @@ def build_gui(root: tk.Tk):
     entry_proxy_address = ttk.Entry(proxy_address_frame, textvariable=proxy_address_var)
     entry_proxy_address.pack(side=tk.LEFT, expand=True, fill=tk.X, padx=(0,5))
 
-    # 代理测试按钮
+    # Proxy test button
     btn_test_proxy_inline = ttk.Button(proxy_address_frame, text="", command=test_proxy_connectivity_gui, width=8)
     btn_test_proxy_inline.pack(side=tk.RIGHT)
     widgets_to_translate.append({"widget": btn_test_proxy_inline, "key": "test_proxy_btn"})
@@ -2179,21 +2177,21 @@ def build_gui(root: tk.Tk):
     port_auto_check_btn.pack(side=tk.LEFT)
     widgets_to_translate.append({"widget": port_auto_check_btn, "key": "port_auto_check", "property": "text"})
 
-    # 启动选项部分
+    # Launch options section
     launch_options_frame = ttk.LabelFrame(left_frame_container, text="")
     launch_options_frame.grid(row=left_current_row, column=0, sticky="ew", padx=2, pady=5)
     widgets_to_translate.append({"widget": launch_options_frame, "key": "launch_options_label", "property": "text"})
     left_current_row += 1
-    lbl_launch_options_note = ttk.Label(launch_options_frame, text="", wraplength=240) # 调整wraplength
+    lbl_launch_options_note = ttk.Label(launch_options_frame, text="", wraplength=240) # Adjust wraplength
     lbl_launch_options_note.pack(fill=tk.X, padx=5, pady=(5, 8))
     widgets_to_translate.append({"widget": lbl_launch_options_note, "key": "launch_options_note_revised"})
-    # (启动按钮)
+    # (Launch buttons)
     btn_headed = ttk.Button(launch_options_frame, text="", command=start_headed_interactive_gui)
     btn_headed.pack(fill=tk.X, padx=5, pady=3)
     widgets_to_translate.append({"widget": btn_headed, "key": "launch_headed_interactive_btn"})
-    btn_headless = ttk.Button(launch_options_frame, text="", command=start_headless_gui) # command 和 key 修改
+    btn_headless = ttk.Button(launch_options_frame, text="", command=start_headless_gui) # command and key modified
     btn_headless.pack(fill=tk.X, padx=5, pady=3)
-    widgets_to_translate.append({"widget": btn_headless, "key": "launch_headless_btn"}) # key 修改
+    widgets_to_translate.append({"widget": btn_headless, "key": "launch_headless_btn"}) # key modified
     btn_virtual_display = ttk.Button(launch_options_frame, text="", command=start_virtual_display_gui)
     btn_virtual_display.pack(fill=tk.X, padx=5, pady=3)
     widgets_to_translate.append({"widget": btn_virtual_display, "key": "launch_virtual_display_btn"})
@@ -2212,7 +2210,7 @@ def build_gui(root: tk.Tk):
     btn_stop_llm_service.pack(fill=tk.X, padx=5, pady=3)
     widgets_to_translate.append({"widget": btn_stop_llm_service, "key": "stop_llm_service_btn"})
 
-    # 移除不再有用的"停止当前GUI管理的服务"按钮
+    # Remove no longer useful "Stop current GUI-managed service" button
     # btn_stop_service = ttk.Button(launch_options_frame, text="", command=stop_managed_service_gui)
     # btn_stop_service.pack(fill=tk.X, padx=5, pady=3)
     # widgets_to_translate.append({"widget": btn_stop_service, "key": "stop_gui_service_btn"})
@@ -2261,7 +2259,7 @@ def build_gui(root: tk.Tk):
     btn_stop_pid.grid(row=0, column=1, sticky="ew", padx=(2,0))
     widgets_to_translate.append({"widget": btn_stop_pid, "key": "stop_selected_pid_btn"})
 
-    # 代理测试按钮已移至代理配置部分，此处不再重复
+    # Proxy test button has been moved to proxy configuration section, no longer repeated here
 
     kill_custom_frame = ttk.LabelFrame(middle_frame_container, text="")
     kill_custom_frame.grid(row=middle_current_row, column=0, sticky="ew", padx=2, pady=5)
@@ -2274,7 +2272,7 @@ def build_gui(root: tk.Tk):
     btn_kill_custom_pid.pack(side=tk.LEFT, padx=5, pady=5)
     widgets_to_translate.append({"widget": btn_kill_custom_pid, "key": "kill_custom_pid_btn"})
 
-    # 认证文件管理 (移到中栏PID终止功能下方)
+    # Authentication file management (moved to middle column below PID termination function)
     auth_section_middle = ttk.LabelFrame(middle_frame_container, text="")
     auth_section_middle.grid(row=middle_current_row, column=0, sticky="ew", padx=2, pady=5)
     widgets_to_translate.append({"widget": auth_section_middle, "key": "auth_files_management", "property": "text"})
@@ -2283,7 +2281,7 @@ def build_gui(root: tk.Tk):
     btn_manage_auth_middle.pack(fill=tk.X, padx=5, pady=5)
     widgets_to_translate.append({"widget": btn_manage_auth_middle, "key": "manage_auth_files_btn"})
 
-    # 显示当前认证文件
+    # Display current authentication file
     auth_display_frame = ttk.Frame(auth_section_middle)
     auth_display_frame.pack(fill=tk.X, padx=5, pady=(0,5))
     lbl_current_auth_static = ttk.Label(auth_display_frame, text="")
@@ -2292,9 +2290,9 @@ def build_gui(root: tk.Tk):
     lbl_current_auth_dynamic = ttk.Label(auth_display_frame, textvariable=active_auth_file_display_var, wraplength=180)
     lbl_current_auth_dynamic.pack(side=tk.LEFT, fill=tk.X, expand=True)
 
-    # --- 右栏 Frame ---
+    # --- Right column Frame ---
     right_frame_container = ttk.Frame(main_paned_window, padding="5")
-    main_paned_window.add(right_frame_container, weight=2) # 调整右栏初始权重，使其相对小一些
+    main_paned_window.add(right_frame_container, weight=2) # Adjust right column initial weight to make it relatively smaller
     right_frame_container.columnconfigure(0, weight=1)
     right_frame_container.rowconfigure(1, weight=1)
     right_current_row = 0
@@ -2315,20 +2313,20 @@ def build_gui(root: tk.Tk):
     widgets_to_translate.append({"widget": output_log_area_frame, "key": "output_label", "property": "text"})
     output_log_area_frame.columnconfigure(0, weight=1)
     output_log_area_frame.rowconfigure(0, weight=1)
-    output_scrolled_text = scrolledtext.ScrolledText(output_log_area_frame, height=10, width=35, wrap=tk.WORD, state=tk.DISABLED) # 调整宽度
+    output_scrolled_text = scrolledtext.ScrolledText(output_log_area_frame, height=10, width=35, wrap=tk.WORD, state=tk.DISABLED) # Adjust width
     output_scrolled_text.grid(row=0, column=0, padx=5, pady=5, sticky="nsew")
     managed_process_info["output_area"] = output_scrolled_text
 
     update_all_ui_texts_gui()
-    query_port_and_display_pids_gui() # 初始化时查询一次FastAPI端口
-    _update_active_auth_display() # 初始化时更新认证文件显示
+    query_port_and_display_pids_gui() # Query FastAPI port once during initialization
+    _update_active_auth_display() # Update authentication file display during initialization
     root.protocol("WM_DELETE_WINDOW", on_app_close_main)
 
 pid_list_lbl_frame_ref: Optional[ttk.LabelFrame] = None
 
-# 新增辅助函数用于获取和验证启动参数
+# Add auxiliary function for getting and validating launch parameters
 def _get_launch_parameters() -> Optional[Dict[str, Any]]:
-    """从GUI收集并验证启动参数。如果无效则返回None。"""
+    """Collect and validate launch parameters from GUI. Return None if invalid."""
     params = {}
     try:
         params["fastapi_port"] = get_fastapi_port_from_gui()
@@ -2348,16 +2346,16 @@ def _get_launch_parameters() -> Optional[Dict[str, Any]]:
         params["helper_endpoint"] = helper_endpoint_var.get().strip() if params["helper_enabled"] else ""
 
         return params
-    except ValueError: # 通常来自 int() 转换失败
-        messagebox.showwarning(get_text("warning_title"), get_text("enter_valid_port_warn")) # 或者更具体的错误
+    except ValueError: # Usually from int() conversion failure
+        messagebox.showwarning(get_text("warning_title"), get_text("enter_valid_port_warn")) # Or more specific error
         return None
     except Exception as e:
-        messagebox.showerror(get_text("error_title"), f"获取启动参数时出错: {e}")
+        messagebox.showerror(get_text("error_title"), f"Error getting launch parameters: {e}")
         return None
 
-# 更新on_app_close_main函数，反映服务独立性
+# Update on_app_close_main function to reflect service independence
 def on_app_close_main():
-    # 保存当前配置
+    # Save current configuration
     save_config()
 
     # Attempt to stop LLM service if it's running
@@ -2387,7 +2385,7 @@ def on_app_close_main():
             finally:
                 llm_service_process_info["popen"] = None # Clear it
 
-    # 服务都是在独立终端中启动的，所以只需确认用户是否想关闭GUI
+    # Services are all started in independent terminals, so just need to confirm if user wants to close GUI
     if messagebox.askyesno(get_text("confirm_quit_title"), get_text("confirm_quit_message"), parent=root_widget):
         if root_widget:
             root_widget.destroy()

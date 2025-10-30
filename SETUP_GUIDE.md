@@ -29,7 +29,7 @@
 
 ### Step 1: Clone the Repository
 ```bash
-git clone https://github.com/your-repo/AIstudioProxyAPI.git
+git clone https://github.com/JackHwang/AIstudioProxyAPI.git
 cd AIstudioProxyAPI
 ```
 
@@ -531,7 +531,7 @@ For experienced users who want to get started quickly:
 
 ```bash
 # 1. Clone and install
-git clone https://github.com/your-repo/AIstudioProxyAPI.git
+git clone https://github.com/JackHwang/AIstudioProxyAPI.git
 cd AIstudioProxyAPI
 poetry install && poetry shell
 
