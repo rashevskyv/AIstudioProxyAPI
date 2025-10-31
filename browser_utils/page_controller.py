@@ -75,7 +75,7 @@ class PageController:
             self.logger.info(f"[{self.req_id}] URL Context disabled; skipping.")
 
         # Thinking budget
-        await self._handle_thinking_budget(request_params, check_client_disconnected)
+        await self._handle_thinking_budget_old(request_params, check_client_disconnected)
 
         # Google Search
         await self._adjust_google_search(request_params, check_client_disconnected)
