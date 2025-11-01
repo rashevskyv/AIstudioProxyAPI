@@ -3,6 +3,7 @@ PageController module
 Encapsulates complex logic for direct interactions with Playwright page.
 """
 import asyncio
+import inspect
 import re
 from typing import Callable, List, Dict, Any, Optional
 
@@ -36,8 +37,14 @@ class PageController:
         self.req_id = req_id
 
     async def _check_disconnect(self, check_client_disconnected: Callable, stage: str):
-        """Check whether client disconnected."""
-        if check_client_disconnected(stage):
+        """Check whether client disconnected. Supports both async and sync functions."""
+        # Support both async and sync check_client_disconnected functions
+        if inspect.iscoroutinefunction(check_client_disconnected):
+            result = await check_client_disconnected(stage)
+        else:
+            result = check_client_disconnected(stage)
+
+        if result:
             raise ClientDisconnectedError(f"[{self.req_id}] Client disconnected at stage: {stage}")
 
     async def adjust_parameters(self, request_params: Dict[str, Any], page_params_cache: Dict[str, Any], params_cache_lock: asyncio.Lock, model_id_to_use: str, parsed_model_list: List[Dict[str, Any]], check_client_disconnected: Callable):
@@ -1341,34 +1348,141 @@ class PageController:
             raise
 
     async def scroll_to_top(self, check_client_disconnected: Callable):
-        """Scroll to the top of the page using Ctrl+Home."""
+        """Scroll to the top by scrolling to the first chat element."""
         self.logger.info(f"[{self.req_id}] Scrolling to top of page...")
         try:
             await self._check_disconnect(check_client_disconnected, "Before scroll to top")
-            
-            # Press Ctrl+Home to scroll to top
-            await self.page.keyboard.press('Control+Home')
-            await asyncio.sleep(0.5)  # Wait for scroll to complete
-            
+
+            # Universal scroll to top - finds ALL scrollable containers and scrolls them
+            scroll_script = """
+            () => {
+                // Find all elements that are scrollable (scrollHeight > clientHeight)
+                const allElements = document.querySelectorAll('*');
+                const scrollableElements = [];
+
+                for (const element of allElements) {
+                    if (element.scrollHeight > element.clientHeight) {
+                        const computedStyle = window.getComputedStyle(element);
+                        const overflowY = computedStyle.overflowY;
+
+                        // Check if element is actually scrollable
+                        if (overflowY === 'auto' || overflowY === 'scroll' || overflowY === 'overlay') {
+                            scrollableElements.push({
+                                element: element,
+                                tagName: element.tagName.toLowerCase(),
+                                className: element.className,
+                                scrollHeight: element.scrollHeight,
+                                clientHeight: element.clientHeight,
+                                beforeScroll: element.scrollTop
+                            });
+                        }
+                    }
+                }
+
+                // Scroll all scrollable containers to top
+                let scrolled = 0;
+                for (const item of scrollableElements) {
+                    item.element.scrollTop = 0;
+                    if (item.element.scrollTop !== item.beforeScroll) {
+                        scrolled++;
+                    }
+                }
+
+                // Also scroll window
+                window.scrollTo(0, 0);
+
+                return {
+                    success: true,
+                    method: 'universal-scroll',
+                    totalScrollable: scrollableElements.length,
+                    scrolledCount: scrolled,
+                    containers: scrollableElements.slice(0, 3).map(s => ({
+                        tag: s.tagName,
+                        class: s.className ? s.className.substring(0, 50) : '',
+                        height: s.scrollHeight
+                    }))
+                };
+            }
+            """
+
+            result = await self.page.evaluate(scroll_script)
+            self.logger.info(f"[{self.req_id}] Scrolled to top using: {result.get('method', 'unknown')}")
+            await asyncio.sleep(0.5)  # Wait for smooth scroll to complete
+
             self.logger.info(f"[{self.req_id}] ✅ Successfully scrolled to top of page")
-            
+
         except Exception as e:
             self.logger.error(f"[{self.req_id}] ❌ Error scrolling to top: {e}")
             if isinstance(e, ClientDisconnectedError):
                 raise
 
     async def scroll_to_bottom(self, check_client_disconnected: Callable):
-        """Scroll to the bottom of the page using Ctrl+End."""
+        """Scroll to the bottom by scrolling to the last model response element."""
         self.logger.info(f"[{self.req_id}] Scrolling to bottom of page...")
         try:
             await self._check_disconnect(check_client_disconnected, "Before scroll to bottom")
-            
-            # Press Ctrl+End to scroll to bottom
-            await self.page.keyboard.press('Control+End')
-            await asyncio.sleep(0.5)  # Wait for scroll to complete
-            
+
+            # Universal scroll to bottom - finds ALL scrollable containers and scrolls them
+            scroll_script = """
+            () => {
+                // Find all elements that are scrollable (scrollHeight > clientHeight)
+                const allElements = document.querySelectorAll('*');
+                const scrollableElements = [];
+
+                for (const element of allElements) {
+                    if (element.scrollHeight > element.clientHeight) {
+                        const computedStyle = window.getComputedStyle(element);
+                        const overflowY = computedStyle.overflowY;
+
+                        // Check if element is actually scrollable
+                        if (overflowY === 'auto' || overflowY === 'scroll' || overflowY === 'overlay') {
+                            scrollableElements.push({
+                                element: element,
+                                tagName: element.tagName.toLowerCase(),
+                                className: element.className,
+                                scrollHeight: element.scrollHeight,
+                                clientHeight: element.clientHeight,
+                                beforeScroll: element.scrollTop
+                            });
+                        }
+                    }
+                }
+
+                // Sort by scrollHeight (largest first - usually the main container)
+                scrollableElements.sort((a, b) => b.scrollHeight - a.scrollHeight);
+
+                // Scroll all scrollable containers to bottom
+                let scrolled = 0;
+                for (const item of scrollableElements) {
+                    item.element.scrollTop = item.element.scrollHeight;
+                    if (item.element.scrollTop !== item.beforeScroll) {
+                        scrolled++;
+                    }
+                }
+
+                // Also scroll window
+                window.scrollTo(0, document.body.scrollHeight);
+
+                return {
+                    success: true,
+                    method: 'universal-scroll',
+                    totalScrollable: scrollableElements.length,
+                    scrolledCount: scrolled,
+                    containers: scrollableElements.slice(0, 3).map(s => ({
+                        tag: s.tagName,
+                        class: s.className ? s.className.substring(0, 50) : '',
+                        height: s.scrollHeight
+                    }))
+                };
+            }
+            """
+
+            result = await self.page.evaluate(scroll_script)
+            self.logger.info(f"[{self.req_id}] Scrolled to bottom using: {result.get('method', 'unknown')}")
+            await asyncio.sleep(0.5)  # Wait for smooth scroll to complete
+
             self.logger.info(f"[{self.req_id}] ✅ Successfully scrolled to bottom of page")
-            
+
         except Exception as e:
             self.logger.error(f"[{self.req_id}] ❌ Error scrolling to bottom: {e}")
             if isinstance(e, ClientDisconnectedError):
