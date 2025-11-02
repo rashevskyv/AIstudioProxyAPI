@@ -450,13 +450,26 @@ async def _process_request_refactored(
     """核心请求处理函数 - 重构版本"""
 
     # 优化：在开始任何处理前主动检测客户端连接状态
+    from server import logger
+    from config import get_environment_variable
+
     is_connected = await _test_client_connection(req_id, http_request)
     if not is_connected:
-        from server import logger
         logger.info(f"[{req_id}] ✅ 核心处理前检测到客户端断开，提前退出节省资源")
         if not result_future.done():
             result_future.set_exception(HTTPException(status_code=499, detail=f"[{req_id}] 客户端在处理开始前已断开连接"))
         return None
+
+    stream_port = get_environment_variable('STREAM_PORT')
+    use_stream = stream_port != '0'
+    if use_stream:
+        logger.info(f"[{req_id}] 🔧 请求开始前清空流式队列（防止残留数据）...")
+        try:
+            from api_utils import clear_stream_queue
+            await clear_stream_queue()
+            logger.info(f"[{req_id}] ✅ 流式队列已清空")
+        except Exception as clear_err:
+            logger.warning(f"[{req_id}] ⚠️ 清空流式队列时出错: {clear_err}")
 
     context = await _initialize_request_context(req_id, request)
     context = await _analyze_model_requirements(req_id, context, request)
