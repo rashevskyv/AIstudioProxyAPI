@@ -38,8 +38,6 @@ This project is generously sponsored by ZMTO. Visit their website: [https://zmto
 | **依赖管理** | Poetry | 最新版本 | 现代化 Python 依赖管理工具 |
 | **类型检查** | Pyright (可选) | 最新版本 | 用于开发时类型检查和 IDE 支持 |
 
-**最后更新**: 2024年11月  
-**当前版本**: v0.6.0-integrated
 
 ## 系统要求
 
