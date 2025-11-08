@@ -1,7 +1,27 @@
 {
   "permissions": {
     "allow": [
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(git checkout:*)",
+      "Bash(git commit:*)",
+      "Bash(git push)",
+      "Bash(git push:*)",
+      "Bash(lsof:*)",
+      "Bash(pip3 list:*)",
+      "Bash(command -v poetry:*)",
+      "Bash(sudo apt update:*)",
+      "Bash(/mnt/c/Python311/python.exe:*)",
+      "Bash(/mnt/c/Users/*/AppData/Local/Programs/Python/Python311/python.exe)",
+      "Bash(sudo -S add-apt-repository:*)",
+      "Bash(sudo -S apt update:*)",
+      "Bash(sudo -S apt install:*)",
+      "Bash(apt-cache search:*)",
+      "Bash(curl:*)",
+      "Bash(bash)",
+      "Bash(~/.bashrc)",
+      "Bash(export PYENV_ROOT=\"$HOME/.pyenv\")",
+      "Bash(export PATH=\"$PYENV_ROOT/bin:$PATH\")",
+      "Bash(pyenv:*)"
     ],
     "deny": [],
     "ask": []
